@@ -48,9 +48,20 @@
     },
     {
       "id": "viewer",
-      "name": "Visualizzatore",
+      "name": "Visualizzatore Globale",
       "role": "Read-Only",
       "applications": ["*"]
+    },
+    {
+      "id": "marco.belli",
+      "name": "Marco Belli",
+      "role": "Read-Only",
+      "applications": {
+        "Portale Clienti": "ro",
+        "CRM Aziendale": "ro",
+        "ERP Finance": "ro",
+        "lista_server": "ro"
+      }
     }
   ]
 }

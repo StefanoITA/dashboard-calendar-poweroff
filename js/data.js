@@ -77,7 +77,14 @@ const DataManager = (() => {
     function getAppPermission(appName) {
         if (!currentUser) return null;
         if (currentUser.role === 'Admin') return 'rw';
-        if (currentUser.role === 'Read-Only') return 'ro';
+        if (currentUser.role === 'Read-Only') {
+            const apps = currentUser.applications;
+            if (Array.isArray(apps) && apps.includes('*')) return 'ro';
+            if (typeof apps === 'object' && !Array.isArray(apps)) {
+                return apps[appName] ? 'ro' : null;
+            }
+            return 'ro';
+        }
 
         const apps = currentUser.applications;
         // Array format (legacy): ["*"] or ["App1", "App2"]
@@ -111,6 +118,27 @@ const DataManager = (() => {
             });
         });
         return pairs;
+    }
+
+    function isGlobalReadOnly() {
+        if (!currentUser || currentUser.role !== 'Read-Only') return false;
+        const apps = currentUser.applications;
+        return Array.isArray(apps) && apps.includes('*');
+    }
+
+    function canViewVMList() {
+        if (!currentUser) return false;
+        if (currentUser.role === 'Admin') return true;
+        if (isGlobalReadOnly()) return true;
+        const apps = currentUser.applications;
+        if (typeof apps === 'object' && !Array.isArray(apps) && apps['lista_server']) return true;
+        return false;
+    }
+
+    function getVMListMachines() {
+        if (!currentUser) return [];
+        if (currentUser.role === 'Admin' || isGlobalReadOnly()) return [...machines];
+        return machines.filter(m => canAccessApp(m.application));
     }
 
     // ============================================
@@ -300,9 +328,62 @@ const DataManager = (() => {
     }
 
     function addEntryForEnv(appName, envName, entry) {
+        const groupId = generateId();
         getMachines(appName, envName).forEach(m => {
-            addScheduleEntry(appName, envName, m.hostname, { ...entry });
+            addScheduleEntry(appName, envName, m.hostname, { ...entry, envGroupId: groupId });
         });
+        return groupId;
+    }
+
+    function getEnvGroups(appName, envName) {
+        const ms = getMachines(appName, envName);
+        const groups = {};
+        ms.forEach(m => {
+            const entries = getScheduleEntries(appName, envName, m.hostname);
+            entries.forEach(e => {
+                if (e.envGroupId) {
+                    if (!groups[e.envGroupId]) {
+                        groups[e.envGroupId] = { groupId: e.envGroupId, entry: { ...e }, hostnames: [], totalMachines: ms.length };
+                    }
+                    groups[e.envGroupId].hostnames.push(m.hostname);
+                }
+            });
+        });
+        return Object.values(groups);
+    }
+
+    function updateEnvGroup(appName, envName, groupId, newEntryData) {
+        const ms = getMachines(appName, envName);
+        ms.forEach(m => {
+            const key = scheduleKey(appName, envName, m.hostname);
+            const entries = schedules[key] || [];
+            const idx = entries.findIndex(e => e.envGroupId === groupId);
+            if (idx !== -1) {
+                entries[idx] = { ...newEntryData, id: entries[idx].id, envGroupId: groupId };
+            }
+        });
+        saveSchedulesToStorage();
+    }
+
+    function removeEnvGroup(appName, envName, groupId) {
+        const ms = getMachines(appName, envName);
+        ms.forEach(m => {
+            const key = scheduleKey(appName, envName, m.hostname);
+            if (schedules[key]) {
+                schedules[key] = schedules[key].filter(e => e.envGroupId !== groupId);
+                if (schedules[key].length === 0) delete schedules[key];
+            }
+        });
+        saveSchedulesToStorage();
+    }
+
+    function excludeFromEnvGroup(appName, envName, hostname, groupId) {
+        const key = scheduleKey(appName, envName, hostname);
+        if (schedules[key]) {
+            schedules[key] = schedules[key].filter(e => e.envGroupId !== groupId);
+            if (schedules[key].length === 0) delete schedules[key];
+        }
+        saveSchedulesToStorage();
     }
 
     function saveSchedulesToStorage() {
@@ -480,6 +561,60 @@ const DataManager = (() => {
         return upcoming;
     }
 
+    // ============================================
+    // Cronjob Generation (per entry, per server)
+    // ============================================
+    function generateCronjobs(entries) {
+        if (!entries || entries.length === 0) return [];
+        return entries.map(entry => {
+            const cj = { entryId: entry.id, type: entry.type, crons: [] };
+            const [startH, startM] = entry.startTime ? entry.startTime.split(':').map(Number) : [0, 0];
+            const [stopH, stopM] = entry.stopTime ? entry.stopTime.split(':').map(Number) : [0, 0];
+
+            if (entry.recurring === 'daily') {
+                if (entry.type === 'window') {
+                    cj.crons.push({ action: 'startup', expression: `${startM} ${startH} * * *` });
+                    cj.crons.push({ action: 'shutdown', expression: `${stopM} ${stopH} * * *` });
+                } else {
+                    cj.crons.push({ action: 'shutdown', expression: '0 0 * * *' });
+                }
+            } else if (entry.recurring === 'weekdays') {
+                if (entry.type === 'window') {
+                    cj.crons.push({ action: 'startup', expression: `${startM} ${startH} * * 1-5` });
+                    cj.crons.push({ action: 'shutdown', expression: `${stopM} ${stopH} * * 1-5` });
+                } else {
+                    cj.crons.push({ action: 'shutdown', expression: '0 0 * * 1-5' });
+                }
+            } else if (entry.recurring === 'weekends') {
+                if (entry.type === 'window') {
+                    cj.crons.push({ action: 'startup', expression: `${startM} ${startH} * * 0,6` });
+                    cj.crons.push({ action: 'shutdown', expression: `${stopM} ${stopH} * * 0,6` });
+                } else {
+                    cj.crons.push({ action: 'shutdown', expression: '0 0 * * 0,6' });
+                }
+            } else if (entry.dates && entry.dates.length > 0) {
+                // Group dates by month for compact cron
+                const byMonth = {};
+                entry.dates.forEach(d => {
+                    const parts = d.split('-').map(Number);
+                    const key = `${parts[0]}-${parts[1]}`;
+                    if (!byMonth[key]) byMonth[key] = { month: parts[1], days: [] };
+                    byMonth[key].days.push(parts[2]);
+                });
+                for (const group of Object.values(byMonth)) {
+                    const days = group.days.sort((a, b) => a - b).join(',');
+                    if (entry.type === 'window') {
+                        cj.crons.push({ action: 'startup', expression: `${startM} ${startH} ${days} ${group.month} *` });
+                        cj.crons.push({ action: 'shutdown', expression: `${stopM} ${stopH} ${days} ${group.month} *` });
+                    } else {
+                        cj.crons.push({ action: 'shutdown', expression: `0 0 ${days} ${group.month} *` });
+                    }
+                }
+            }
+            return cj;
+        });
+    }
+
     return {
         loadFromFile, loadFromPath, loadUsers, loadFromDynamo, loadMessages,
         getUsers, setCurrentUser, getCurrentUser, isReadOnly, isAppReadOnly, getAppPermission,
@@ -490,6 +625,8 @@ const DataManager = (() => {
         exportSchedules, getAllSchedulesFlat, getStats, envHasSchedules, getEnvScheduleStats,
         getSchedulesRef, getMessages, getUpcomingSchedules,
         getNotes, addNote, updateNote, deleteNote, getAllNotesCount,
+        getEnvGroups, updateEnvGroup, removeEnvGroup, excludeFromEnvGroup,
+        isGlobalReadOnly, canViewVMList, getVMListMachines, generateCronjobs,
         get machines() { return machines; }
     };
 })();
