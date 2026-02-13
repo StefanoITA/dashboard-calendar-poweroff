@@ -4,101 +4,95 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Shutdown Scheduler</title>
-    <link rel="stylesheet" href="css/style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-    <!-- Sidebar -->
-    <aside class="sidebar" id="sidebar">
+    <!-- ========== Sidebar ========== -->
+    <aside class="sidebar">
         <div class="sidebar-header">
             <div class="logo">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
-                    <line x1="12" y1="2" x2="12" y2="12"></line>
-                </svg>
-                <span>Shutdown Scheduler</span>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                Shutdown Scheduler
             </div>
         </div>
 
         <div class="sidebar-nav-actions">
-            <button class="btn-icon sidebar-action-btn" id="homeBtn" title="Home">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
-                    <polyline points="9 22 9 12 15 12 15 22"></polyline>
-                </svg>
-                <span>Home</span>
+            <button class="sidebar-action-btn" id="homeBtn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                Dashboard
             </button>
-            <button class="btn-icon sidebar-action-btn" id="generalCalendarBtn" title="Calendario Generale">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                    <line x1="16" y1="2" x2="16" y2="6"></line>
-                    <line x1="8" y1="2" x2="8" y2="6"></line>
-                    <line x1="3" y1="10" x2="21" y2="10"></line>
-                </svg>
-                <span>Calendario Generale</span>
+            <button class="sidebar-action-btn" id="generalCalendarBtn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                Calendario Generale
             </button>
         </div>
 
         <div class="sidebar-section">
             <div class="sidebar-label">Applicazioni</div>
-            <nav class="app-list" id="appList"></nav>
+            <div class="app-list" id="appList"></div>
         </div>
 
         <div class="sidebar-footer">
-            <button class="btn-icon" id="importCsvBtn" title="Importa CSV">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                    <polyline points="17 8 12 3 7 8"></polyline>
-                    <line x1="12" y1="3" x2="12" y2="15"></line>
-                </svg>
-                <span>Importa CSV</span>
+            <div class="user-selector-panel" id="userSelectorPanel"></div>
+            <button class="btn-secondary" id="importCsvBtn" style="width:100%;justify-content:center;font-size:0.8rem;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                Importa CSV
             </button>
-            <input type="file" id="csvFileInput" accept=".csv" style="display:none;">
+            <input type="file" id="csvFileInput" accept=".csv" style="display:none">
         </div>
     </aside>
 
-    <!-- Environment Popover -->
-    <div class="env-popover" id="envPopover" style="display:none;">
+    <!-- ========== Environment Popover ========== -->
+    <div class="env-popover" id="envPopover" style="display:none">
         <div class="env-popover-header">Ambienti</div>
         <div class="env-popover-list" id="envPopoverList"></div>
     </div>
 
-    <!-- Main Content -->
+    <!-- ========== Main Content ========== -->
     <main class="main-content">
-        <header class="topbar">
+        <div class="topbar">
             <div class="breadcrumb" id="breadcrumb">
                 <span class="breadcrumb-item active">Seleziona un'applicazione</span>
             </div>
             <div class="topbar-actions">
-                <button class="btn-secondary" id="exportBtn" style="display:none;">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                        <polyline points="7 10 12 15 17 10"></polyline>
-                        <line x1="12" y1="15" x2="12" y2="3"></line>
-                    </svg>
-                    Esporta JSON
+                <button class="btn-icon" id="exportBtn" style="display:none" title="Esporta JSON">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    Esporta
                 </button>
-                <button class="btn-icon theme-toggle" id="themeToggle" title="Cambia tema">
-                    <svg class="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-                    <svg class="icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                <div class="topbar-btn-badge">
+                    <button class="btn-icon" id="auditLogBtn" title="Registro attivit&agrave;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                    </button>
+                </div>
+                <div class="topbar-btn-badge">
+                    <button class="btn-primary" id="saveConfigBtn" style="font-size:0.8rem;padding:7px 14px;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                        Salva Configurazione
+                    </button>
+                    <span class="badge-count" id="changesBadge" style="display:none">0</span>
+                </div>
+                <button class="btn-icon theme-toggle" id="themeToggle" title="Tema">
+                    <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                    <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
                 </button>
             </div>
-        </header>
+        </div>
 
-        <!-- Welcome -->
-        <section class="welcome-screen" id="welcomeScreen">
+        <!-- Welcome Screen -->
+        <div class="welcome-screen" id="welcomeScreen">
             <div class="welcome-icon">
-                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+                <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
             </div>
             <h1>Shutdown Scheduler</h1>
-            <p>Seleziona un'applicazione dalla sidebar per definire le finestre di spegnimento.</p>
+            <p>Seleziona un'applicazione dalla barra laterale per gestire le pianificazioni di spegnimento e accensione dei server.</p>
             <div class="welcome-stats" id="welcomeStats"></div>
-        </section>
+        </div>
 
-        <!-- Machines -->
-        <section class="machines-view" id="machinesView" style="display:none;">
+        <!-- Machines View -->
+        <div class="machines-view" id="machinesView" style="display:none">
             <div class="env-controls">
                 <div class="env-header">
                     <div class="env-info">
@@ -107,141 +101,146 @@
                     </div>
                     <div class="env-actions">
                         <button class="btn-primary" id="applyAllBtn">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                            Pianifica Intero Ambiente
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            Pianifica Ambiente
                         </button>
                     </div>
                 </div>
             </div>
             <div class="machine-grid" id="machineGrid"></div>
-        </section>
+        </div>
 
-        <!-- General Calendar -->
-        <section class="general-calendar-view" id="generalCalendarView" style="display:none;">
+        <!-- General Calendar View -->
+        <div class="general-calendar-view" id="generalCalendarView" style="display:none">
             <div class="gc-header">
                 <h2>Calendario Generale</h2>
-                <p class="gc-subtitle">Panoramica di tutte le pianificazioni per applicazione e ambiente</p>
+                <div class="gc-subtitle">Panoramica di tutte le pianificazioni per mese</div>
             </div>
             <div class="gc-filters" id="gcFilters"></div>
             <div class="gc-nav">
-                <button class="btn-icon" id="gcPrevMonth"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
+                <button class="btn-icon" id="gcPrevMonth">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                </button>
                 <h3 id="gcMonthYear"></h3>
-                <button class="btn-icon" id="gcNextMonth"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>
+                <button class="btn-icon" id="gcNextMonth">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                </button>
             </div>
-            <div class="gc-weekdays"><span>Lun</span><span>Mar</span><span>Mer</span><span>Gio</span><span>Ven</span><span>Sab</span><span>Dom</span></div>
+            <div class="gc-weekdays">
+                <span>Lun</span><span>Mar</span><span>Mer</span><span>Gio</span><span>Ven</span><span>Sab</span><span>Dom</span>
+            </div>
             <div class="gc-grid" id="gcGrid"></div>
-        </section>
-
-        <!-- Schedule Modal -->
-        <div class="modal-overlay" id="scheduleModal" style="display:none;">
-            <div class="modal">
-                <div class="modal-header">
-                    <h3 id="modalTitle">Pianifica Spegnimento</h3>
-                    <button class="btn-icon modal-close" id="modalClose"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-                </div>
-                <div class="modal-body">
-                    <!-- LEFT COLUMN -->
-                    <div class="modal-body-left">
-                        <div class="modal-target" id="modalTarget"></div>
-
-                        <div class="schedule-type-selector">
-                            <button class="schedule-type-btn active" data-type="window">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                                Finestra Oraria
-                            </button>
-                            <button class="schedule-type-btn" data-type="shutdown">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
-                                Shutdown Completo
-                            </button>
-                        </div>
-
-                        <div class="time-window-config" id="timeWindowConfig">
-                            <div class="time-row">
-                                <div class="time-field">
-                                    <label>Accensione (Start)</label>
-                                    <div class="time-picker" id="startTimePicker" data-hour="08" data-min="00">
-                                        <button class="time-picker-btn" type="button">
-                                            <span class="time-picker-value">08:00</span>
-                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                                        </button>
-                                        <div class="time-picker-dropdown">
-                                            <div class="time-picker-col">
-                                                <div class="time-picker-col-label">Ore</div>
-                                                <div class="time-picker-options tp-hours"></div>
-                                            </div>
-                                            <div class="time-picker-col">
-                                                <div class="time-picker-col-label">Min</div>
-                                                <div class="time-picker-options tp-minutes"></div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="time-separator">
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-                                </div>
-                                <div class="time-field">
-                                    <label>Spegnimento (Stop)</label>
-                                    <div class="time-picker" id="stopTimePicker" data-hour="20" data-min="00">
-                                        <button class="time-picker-btn" type="button">
-                                            <span class="time-picker-value">20:00</span>
-                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                                        </button>
-                                        <div class="time-picker-dropdown">
-                                            <div class="time-picker-col">
-                                                <div class="time-picker-col-label">Ore</div>
-                                                <div class="time-picker-options tp-hours"></div>
-                                            </div>
-                                            <div class="time-picker-col">
-                                                <div class="time-picker-col-label">Min</div>
-                                                <div class="time-picker-options tp-minutes"></div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="recurring-section">
-                            <div class="sidebar-label">Ricorrenza</div>
-                            <div class="recurring-options">
-                                <label class="recurring-option"><input type="radio" name="recurring" value="none" checked><span class="recurring-label">Giorni specifici (calendario)</span></label>
-                                <label class="recurring-option"><input type="radio" name="recurring" value="daily"><span class="recurring-label">Ogni giorno</span></label>
-                                <label class="recurring-option"><input type="radio" name="recurring" value="weekdays"><span class="recurring-label">Ogni giorno (Lun-Ven)</span></label>
-                                <label class="recurring-option"><input type="radio" name="recurring" value="weekends"><span class="recurring-label">Solo weekend (Sab-Dom)</span></label>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- RIGHT COLUMN -->
-                    <div class="modal-body-right" id="modalBodyRight">
-                        <div class="calendar-section" id="calendarSection">
-                            <div class="calendar-header">
-                                <button class="btn-icon" id="prevMonth"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
-                                <h4 id="calendarMonthYear"></h4>
-                                <button class="btn-icon" id="nextMonth"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>
-                            </div>
-                            <div class="calendar-weekdays"><span>Lun</span><span>Mar</span><span>Mer</span><span>Gio</span><span>Ven</span><span>Sab</span><span>Dom</span></div>
-                            <div class="calendar-grid" id="calendarGrid"></div>
-                            <div class="calendar-actions">
-                                <button class="btn-text" id="selectWeekdays">Lun-Ven</button>
-                                <button class="btn-clear-selection" id="clearSelection" title="Deseleziona tutto"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button class="btn-secondary" id="modalCancel">Annulla</button>
-                    <button class="btn-primary" id="modalSave">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                        Salva Pianificazione
-                    </button>
-                </div>
-            </div>
         </div>
-
-        <div class="toast-container" id="toastContainer"></div>
     </main>
 
+    <!-- ========== Schedule Modal ========== -->
+    <div class="modal-overlay" id="scheduleModal" style="display:none">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="modalTitle">Nuova Pianificazione</h3>
+                <button class="btn-icon modal-close" id="modalClose">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-body-left">
+                    <div class="modal-target" id="modalTarget"></div>
+
+                    <div class="schedule-type-selector">
+                        <button class="schedule-type-btn active" data-type="window">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                            Finestra Oraria
+                        </button>
+                        <button class="schedule-type-btn" data-type="shutdown">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+                            Shutdown Completo
+                        </button>
+                    </div>
+
+                    <div id="timeWindowConfig">
+                        <div class="time-row">
+                            <div class="time-field">
+                                <label>Accensione</label>
+                                <div class="time-picker" id="startTimePicker" data-hour="08" data-min="00">
+                                    <button type="button" class="time-picker-btn">
+                                        <span class="time-picker-value">08:00</span>
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                    </button>
+                                    <div class="time-picker-dropdown">
+                                        <div class="tp-scroll-col">
+                                            <div class="tp-scroll-label">Ore</div>
+                                            <div class="tp-scroll-list tp-hours"></div>
+                                        </div>
+                                        <div class="tp-scroll-col">
+                                            <div class="tp-scroll-label">Min</div>
+                                            <div class="tp-scroll-list tp-minutes"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="time-field">
+                                <label>Spegnimento</label>
+                                <div class="time-picker" id="stopTimePicker" data-hour="20" data-min="00">
+                                    <button type="button" class="time-picker-btn">
+                                        <span class="time-picker-value">20:00</span>
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                    </button>
+                                    <div class="time-picker-dropdown">
+                                        <div class="tp-scroll-col">
+                                            <div class="tp-scroll-label">Ore</div>
+                                            <div class="tp-scroll-list tp-hours"></div>
+                                        </div>
+                                        <div class="tp-scroll-col">
+                                            <div class="tp-scroll-label">Min</div>
+                                            <div class="tp-scroll-list tp-minutes"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="recurring-section">
+                        <label style="font-size:0.76rem;font-weight:500;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.05em;">Ricorrenza</label>
+                        <div class="recurring-options">
+                            <label class="recurring-option"><input type="radio" name="recurring" value="none" checked><span class="recurring-label">Giorni specifici</span></label>
+                            <label class="recurring-option"><input type="radio" name="recurring" value="daily"><span class="recurring-label">Ogni giorno</span></label>
+                            <label class="recurring-option"><input type="radio" name="recurring" value="weekdays"><span class="recurring-label">Luned&igrave; &mdash; Venerd&igrave;</span></label>
+                            <label class="recurring-option"><input type="radio" name="recurring" value="weekends"><span class="recurring-label">Sabato &mdash; Domenica</span></label>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-body-right" id="modalBodyRight">
+                    <div class="calendar-section" id="calendarSection">
+                        <div class="calendar-header">
+                            <button class="btn-icon" id="prevMonth"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
+                            <h4 id="calendarMonthYear"></h4>
+                            <button class="btn-icon" id="nextMonth"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>
+                        </div>
+                        <div class="calendar-weekdays"><span>Lun</span><span>Mar</span><span>Mer</span><span>Gio</span><span>Ven</span><span>Sab</span><span>Dom</span></div>
+                        <div class="calendar-grid" id="calendarGrid"></div>
+                        <div class="calendar-actions">
+                            <button class="btn-text" id="selectWeekdays">Lun-Ven</button>
+                            <button class="btn-clear-selection" id="clearSelection" title="Deseleziona tutto">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" id="modalCancel">Annulla</button>
+                <button class="btn-primary" id="modalSave">Salva Pianificazione</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== Toast Container ========== -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- ========== Scripts ========== -->
+    <script src="js/audit.js"></script>
+    <script src="js/dynamo.js"></script>
     <script src="js/data.js"></script>
     <script src="js/app.js"></script>
 </body>
