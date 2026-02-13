@@ -13,7 +13,10 @@ const App = (() => {
     let currentView = 'home';
     let gcDate = new Date();
     let gcActiveFilters = new Set();
+    let gcActiveEnvFilters = new Set();
     let isUnauthorized = false;
+    let unsavedReminderTimer = null;
+    let unsavedPopupShown = false;
 
     const $ = s => document.querySelector(s);
     const $$ = s => document.querySelectorAll(s);
@@ -29,6 +32,7 @@ const App = (() => {
     const envClassMap = { 'Development':'dev','Integration':'int','Pre-Produzione':'preprod','Training':'training','Bugfixing':'bugfix','Produzione':'prod' };
     const appColors = ['#c2410c','#7c3aed','#2563eb','#0891b2','#059669','#dc2626','#db2777','#4f46e5','#ca8a04'];
     const recurringLabels = { 'none':'Giorni specifici','daily':'Ogni giorno','weekdays':'Lun-Ven','weekends':'Sab-Dom' };
+    const envColors = { 'Development':'#2563eb','Integration':'#7c3aed','Bugfixing':'#dc2626','Training':'#0891b2','Pre-Produzione':'#d97706','Produzione':'#059669' };
 
     const SVG = {
         check: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
@@ -345,7 +349,17 @@ const App = (() => {
             const changes = DynamoService.getModifiedAppEnvs(DataManager.getSchedulesRef());
             if (changes.length > 0) {
                 e.preventDefault();
-                e.returnValue = '';
+                e.returnValue = 'Hai modifiche non salvate. Sei sicuro di voler uscire?';
+                return e.returnValue;
+            }
+        });
+        document.addEventListener('mouseleave', (e) => {
+            if (e.clientY <= 0) {
+                const changes = DynamoService.getModifiedAppEnvs(DataManager.getSchedulesRef());
+                if (changes.length > 0 && !unsavedPopupShown) {
+                    unsavedPopupShown = true;
+                    showUnsavedPopup();
+                }
             }
         });
         document.addEventListener('click', e => {
@@ -397,6 +411,7 @@ const App = (() => {
             renderHomeDashboard();
             goHome();
             gcActiveFilters.clear();
+            gcActiveEnvFilters.clear();
             renderUserSelector();
             updateChangesBadge();
         });
@@ -598,27 +613,26 @@ const App = (() => {
     // ============================================
     function renderHomeDashboard() {
         const screen = $('#welcomeScreen');
-        const s = DataManager.getStats();
         const messages = DataManager.getMessages();
-        const upcoming = DataManager.getUpcomingSchedules(7);
         const recentLogs = AuditLog.getLogs().slice(0, 5);
         const apps = DataManager.getApplications();
+        const user = DataManager.getCurrentUser();
+        const firstName = user ? user.name.split(' ')[0] : 'Utente';
+        const hour = new Date().getHours();
+        const greeting = hour < 12 ? 'Buongiorno' : hour < 18 ? 'Buon pomeriggio' : 'Buonasera';
 
         let html = `
             <div class="home-header">
                 <div class="home-title">
-                    <div class="welcome-icon">
-                        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                    </div>
                     <div>
-                        <h1>Shutdown Scheduler</h1>
-                        <p class="home-subtitle">Gestione pianificazioni di spegnimento e accensione server</p>
+                        <div class="home-greeting">${greeting},</div>
+                        <h1 class="home-user-name">${firstName}!</h1>
+                        <p class="home-subtitle">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                            Shutdown Scheduler
+                        </p>
                     </div>
                 </div>
-                <button class="btn-secondary home-refresh-btn" id="homeRefreshBtn">
-                    ${SVG.refresh}
-                    Aggiorna Stato
-                </button>
             </div>`;
 
         // System Messages
@@ -640,80 +654,28 @@ const App = (() => {
             html += '</div>';
         }
 
-        // Stats Grid
-        html += `
-            <div class="home-stats">
-                <div class="stat-card"><div class="stat-value">${s.applications}</div><div class="stat-label">Applicazioni</div></div>
-                <div class="stat-card"><div class="stat-value">${s.environments}</div><div class="stat-label">Ambienti</div></div>
-                <div class="stat-card"><div class="stat-value">${s.accessibleMachines}</div><div class="stat-label">Server</div></div>
-                <div class="stat-card"><div class="stat-value">${s.scheduledMachines}</div><div class="stat-label">Pianificati</div></div>
-                <div class="stat-card"><div class="stat-value">${s.totalSchedules}</div><div class="stat-label">Regole Attive</div></div>
-                <div class="stat-card"><div class="stat-value">${s.notesCount}</div><div class="stat-label">Note</div></div>
-            </div>`;
-
-        // Two-column layout: apps + upcoming/recent
-        html += '<div class="home-columns">';
-
-        // Left: App Overview
-        html += '<div class="home-col">';
-        html += '<div class="home-section-title">Panoramica Applicazioni</div>';
+        // Minimal app list
+        html += '<div class="home-section-title" style="margin-top:16px;">Applicazioni</div>';
+        html += '<div class="home-app-list">';
         apps.forEach((app, i) => {
             const color = appColors[i % appColors.length];
             const perm = DataManager.getAppPermission(app.name);
-            const permLabel = perm === 'rw' ? 'RW' : 'RO';
+            const roleLabels = { 'Admin': 'Admin', 'Application_owner': 'Application Owner', 'Read-Only': 'Sola Lettura' };
+            const permLabel = user && user.role === 'Admin' ? 'Admin' : perm === 'rw' ? 'Application Owner' : 'Sola Lettura';
             const permCls = perm === 'rw' ? 'perm-rw' : 'perm-ro';
-            const envs = DataManager.getEnvironments(app.name);
-            let scheduledEnvs = 0;
-            envs.forEach(e => { if (DataManager.envHasSchedules(app.name, e.name)) scheduledEnvs++; });
-            const progress = envs.length > 0 ? Math.round((scheduledEnvs / envs.length) * 100) : 0;
 
-            html += `<div class="home-app-card" data-app="${app.name}">
-                <div class="home-app-header">
-                    <div class="home-app-icon" style="color:${color};background:${color}12;">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-                    </div>
-                    <div class="home-app-info">
-                        <div class="home-app-name">${app.name}</div>
-                        <div class="home-app-meta">${app.machineCount} server &middot; ${envs.length} ambienti</div>
-                    </div>
-                    <span class="home-app-perm ${permCls}">${permLabel}</span>
-                </div>
-                <div class="home-app-progress">
-                    <div class="home-app-progress-bar" style="width:${progress}%;background:${color}"></div>
-                </div>
-                <div class="home-app-progress-label">${scheduledEnvs}/${envs.length} ambienti configurati</div>
+            html += `<div class="home-app-row" data-app="${app.name}">
+                <div class="home-app-row-dot" style="background:${color}"></div>
+                <span class="home-app-row-name">${app.name}</span>
+                <span class="home-app-row-count">${app.machineCount} server</span>
+                <span class="home-app-row-perm ${permCls}">${permLabel}</span>
+                <svg class="home-app-row-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
             </div>`;
         });
         html += '</div>';
 
-        // Right: Upcoming + Recent
-        html += '<div class="home-col">';
-
-        // Upcoming schedules
-        html += '<div class="home-section-title">Prossime Pianificazioni (7 giorni)</div>';
-        if (upcoming.length === 0) {
-            html += '<div class="home-empty">Nessuna pianificazione nei prossimi 7 giorni</div>';
-        } else {
-            html += '<div class="home-upcoming">';
-            upcoming.slice(0, 8).forEach(u => {
-                const label = u.recurring ? `Ricorrente: ${recurringLabels[u.entry.recurring]}` : `${u.dates.length} giorni`;
-                const timeLabel = u.entry.type === 'shutdown' ? 'Shutdown' : `${u.entry.startTime} - ${u.entry.stopTime}`;
-                html += `<div class="home-upcoming-item">
-                    <div class="home-upcoming-dot"></div>
-                    <div class="home-upcoming-info">
-                        <div class="home-upcoming-title">${u.app} / ${u.env}</div>
-                        <div class="home-upcoming-detail">${u.hostname} &middot; ${timeLabel} &middot; ${label}</div>
-                    </div>
-                </div>`;
-            });
-            if (upcoming.length > 8) {
-                html += `<div class="home-upcoming-more">+${upcoming.length - 8} altre pianificazioni</div>`;
-            }
-            html += '</div>';
-        }
-
         // Recent Activity
-        html += '<div class="home-section-title" style="margin-top:20px;">Attivit\u00e0 Recente</div>';
+        html += '<div class="home-section-title" style="margin-top:24px;">Attivit\u00e0 Recente</div>';
         if (recentLogs.length === 0) {
             html += '<div class="home-empty">Nessuna attivit\u00e0 registrata</div>';
         } else {
@@ -727,19 +689,12 @@ const App = (() => {
             html += '</div>';
         }
 
-        html += '</div></div>'; // close right col + home-columns
-
         screen.innerHTML = html;
 
-        // Bind home refresh button
-        const homeRefreshBtn = screen.querySelector('#homeRefreshBtn');
-        if (homeRefreshBtn) homeRefreshBtn.addEventListener('click', handleRefresh);
-
-        // Bind app cards to navigate
-        screen.querySelectorAll('.home-app-card').forEach(card => {
-            card.style.cursor = 'pointer';
-            card.addEventListener('click', () => {
-                const appName = card.dataset.app;
+        // Bind app rows to navigate
+        screen.querySelectorAll('.home-app-row').forEach(row => {
+            row.addEventListener('click', () => {
+                const appName = row.dataset.app;
                 const item = document.querySelector(`#appList .nav-item[data-app="${appName}"]`);
                 if (item) selectApp(appName, item);
             });
@@ -1306,24 +1261,32 @@ const App = (() => {
 
     function renderGCFilters() {
         const apps = DataManager.getApplications();
+        const allEnvNames = new Set();
+        apps.forEach(a => DataManager.getEnvironments(a.name).forEach(e => allEnvNames.add(e.name)));
+        const envList = [...allEnvNames].sort();
+
+        // Initialize env filters if empty
+        if (gcActiveEnvFilters.size === 0) envList.forEach(e => gcActiveEnvFilters.add(e));
+
         const container = $('#gcFilters');
-        container.innerHTML = '<span class="gc-filters-label">Filtri</span>';
+        container.innerHTML = '';
 
-        const allActive = gcActiveFilters.size === apps.length;
+        // App filters row
+        const appRow = document.createElement('div');
+        appRow.className = 'gc-filter-row';
+        appRow.innerHTML = '<span class="gc-filters-label">Applicazioni</span>';
 
+        const allAppActive = gcActiveFilters.size === apps.length;
         const toggleAll = document.createElement('button');
-        toggleAll.className = 'gc-filter-toggle-all' + (allActive ? ' all-active' : '');
-        toggleAll.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${allActive ? '<polyline points="20 6 9 17 4 12"/>' : '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>'}</svg>${allActive ? 'Deseleziona' : 'Seleziona'} Tutti`;
+        toggleAll.className = 'gc-filter-toggle-all' + (allAppActive ? ' all-active' : '');
+        toggleAll.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${allAppActive ? '<polyline points="20 6 9 17 4 12"/>' : '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>'}</svg>${allAppActive ? 'Deseleziona' : 'Seleziona'} Tutti`;
         toggleAll.addEventListener('click', () => {
-            if (gcActiveFilters.size === apps.length) {
-                gcActiveFilters.clear();
-            } else {
-                apps.forEach(a => gcActiveFilters.add(a.name));
-            }
+            if (gcActiveFilters.size === apps.length) gcActiveFilters.clear();
+            else apps.forEach(a => gcActiveFilters.add(a.name));
             renderGCFilters();
             renderGeneralCalendar();
         });
-        container.appendChild(toggleAll);
+        appRow.appendChild(toggleAll);
 
         apps.forEach((app, i) => {
             const color = appColors[i % appColors.length];
@@ -1333,22 +1296,51 @@ const App = (() => {
             chip.addEventListener('click', () => {
                 if (gcActiveFilters.has(app.name)) gcActiveFilters.delete(app.name);
                 else gcActiveFilters.add(app.name);
-                chip.classList.toggle('active');
-                const ta = container.querySelector('.gc-filter-toggle-all');
-                const nowAll = gcActiveFilters.size === apps.length;
-                ta.className = 'gc-filter-toggle-all' + (nowAll ? ' all-active' : '');
-                ta.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${nowAll ? '<polyline points="20 6 9 17 4 12"/>' : '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>'}</svg>${nowAll ? 'Deseleziona' : 'Seleziona'} Tutti`;
+                renderGCFilters();
                 renderGeneralCalendar();
             });
-            container.appendChild(chip);
+            appRow.appendChild(chip);
         });
+        container.appendChild(appRow);
+
+        // Env filters row
+        const envRow = document.createElement('div');
+        envRow.className = 'gc-filter-row';
+        envRow.innerHTML = '<span class="gc-filters-label">Ambienti</span>';
+
+        const allEnvActive = gcActiveEnvFilters.size === envList.length;
+        const toggleAllEnv = document.createElement('button');
+        toggleAllEnv.className = 'gc-filter-toggle-all' + (allEnvActive ? ' all-active' : '');
+        toggleAllEnv.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${allEnvActive ? '<polyline points="20 6 9 17 4 12"/>' : '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>'}</svg>${allEnvActive ? 'Deseleziona' : 'Seleziona'} Tutti`;
+        toggleAllEnv.addEventListener('click', () => {
+            if (gcActiveEnvFilters.size === envList.length) gcActiveEnvFilters.clear();
+            else envList.forEach(e => gcActiveEnvFilters.add(e));
+            renderGCFilters();
+            renderGeneralCalendar();
+        });
+        envRow.appendChild(toggleAllEnv);
+
+        envList.forEach(env => {
+            const color = envColors[env] || '#7a7a96';
+            const chip = document.createElement('button');
+            chip.className = 'gc-filter-chip' + (gcActiveEnvFilters.has(env) ? ' active' : '');
+            chip.innerHTML = `<span class="gc-filter-dot" style="background:${color}"></span>${env}`;
+            chip.addEventListener('click', () => {
+                if (gcActiveEnvFilters.has(env)) gcActiveEnvFilters.delete(env);
+                else gcActiveEnvFilters.add(env);
+                renderGCFilters();
+                renderGeneralCalendar();
+            });
+            envRow.appendChild(chip);
+        });
+        container.appendChild(envRow);
     }
 
     function renderGeneralCalendar() {
         const year = gcDate.getFullYear(), month = gcDate.getMonth();
         $('#gcMonthYear').textContent = `${monthNames[month]} ${year}`;
 
-        const allSchedules = DataManager.getAllSchedulesFlat().filter(s => gcActiveFilters.has(s.app));
+        const allSchedules = DataManager.getAllSchedulesFlat().filter(s => gcActiveFilters.has(s.app) && gcActiveEnvFilters.has(s.env));
         const daysInMonth = new Date(year, month + 1, 0).getDate();
         let startDow = new Date(year, month, 1).getDay();
         startDow = startDow === 0 ? 6 : startDow - 1;
@@ -1408,7 +1400,8 @@ const App = (() => {
             let tagsHtml = '';
             appEnvMap.forEach((count, k) => {
                 const color = aeColors[k];
-                tagsHtml += `<span class="gc-tag" style="background:${color}18;color:${color};border-color:${color}35" title="${k}: ${count} server">${k} <span class="gc-tag-count">(${count})</span></span>`;
+                const shortName = k.length > 22 ? k.substring(0, 20) + '\u2026' : k;
+                tagsHtml += `<span class="gc-tag" style="background:${color}18;color:${color};border-color:${color}35" title="${k}: ${count} server">${shortName} <span class="gc-tag-count">(${count})</span></span>`;
             });
 
             cell.innerHTML = `<div class="gc-day-number">${d}</div><div class="gc-tags">${tagsHtml}</div>`;
@@ -1443,6 +1436,9 @@ const App = (() => {
         const envs = [...new Set(allMachines.map(m => m.environment))].sort();
         let lastFiltered = allMachines;
         const selectedRows = new Set();
+        const activeApps = new Set();
+        const activeEnvs = new Set();
+        let sortCol = null, sortAsc = true;
 
         vmView.innerHTML = `
             <div class="vm-list-header">
@@ -1462,25 +1458,18 @@ const App = (() => {
                 </div>
             </div>
             <div class="vm-list-filters">
-                <div class="vm-filter-group">
-                    <label class="vm-filter-label">Applicazione</label>
-                    <select class="vm-filter-select" id="vmFilterApp">
-                        <option value="">Tutte</option>
-                        ${apps.map(a => `<option value="${a}">${a}</option>`).join('')}
-                    </select>
+                <div class="vm-filter-row">
+                    <span class="vm-filter-label">Applicazione</span>
+                    <div class="vm-filter-chips" id="vmAppChips"></div>
                 </div>
-                <div class="vm-filter-group">
-                    <label class="vm-filter-label">Ambiente</label>
-                    <select class="vm-filter-select" id="vmFilterEnv">
-                        <option value="">Tutti</option>
-                        ${envs.map(e => `<option value="${e}">${e}</option>`).join('')}
-                    </select>
+                <div class="vm-filter-row">
+                    <span class="vm-filter-label">Ambiente</span>
+                    <div class="vm-filter-chips" id="vmEnvChips"></div>
                 </div>
-                <div class="vm-filter-group vm-filter-search-group">
-                    <label class="vm-filter-label">Cerca</label>
-                    <input type="text" class="vm-filter-search" id="vmFilterSearch" placeholder="Cerca per nome, hostname, instance type...">
-                </div>
-                <div class="vm-filter-group" style="align-self:flex-end;">
+                <div class="vm-filter-row">
+                    <div class="vm-filter-search-group">
+                        <input type="text" class="vm-filter-search" id="vmFilterSearch" placeholder="Cerca per nome, hostname, instance type...">
+                    </div>
                     <span class="vm-filter-count" id="vmFilterCount">${allMachines.length} risultati</span>
                 </div>
             </div>
@@ -1489,17 +1478,51 @@ const App = (() => {
                     <thead>
                         <tr>
                             <th class="vm-th-check"><input type="checkbox" id="vmSelectAll" title="Seleziona tutti"></th>
-                            <th>Nome Server</th>
-                            <th>Hostname</th>
-                            <th class="vm-th-app">Applicazione</th>
-                            <th class="vm-th-env">Ambiente</th>
-                            <th>Instance Type</th>
-                            <th>Tipo</th>
+                            <th class="vm-th-sortable" data-col="machine_name">Nome Server <span class="vm-sort-icon"></span></th>
+                            <th class="vm-th-sortable" data-col="hostname">Hostname <span class="vm-sort-icon"></span></th>
+                            <th class="vm-th-sortable vm-th-app" data-col="application">Applicazione <span class="vm-sort-icon"></span></th>
+                            <th class="vm-th-sortable vm-th-env" data-col="environment">Ambiente <span class="vm-sort-icon"></span></th>
+                            <th class="vm-th-sortable" data-col="instance_type">Instance Type <span class="vm-sort-icon"></span></th>
+                            <th class="vm-th-sortable" data-col="server_type">Tipo <span class="vm-sort-icon"></span></th>
                         </tr>
                     </thead>
                     <tbody id="vmListBody"></tbody>
                 </table>
             </div>`;
+
+        // Render filter chips
+        const renderFilterChips = () => {
+            const appContainer = vmView.querySelector('#vmAppChips');
+            const envContainer = vmView.querySelector('#vmEnvChips');
+            appContainer.innerHTML = '';
+            envContainer.innerHTML = '';
+
+            apps.forEach((a, i) => {
+                const color = appColors[i % appColors.length];
+                const chip = document.createElement('button');
+                chip.className = 'gc-filter-chip' + (activeApps.has(a) ? ' active' : '');
+                chip.innerHTML = `<span class="gc-filter-dot" style="background:${color}"></span>${a}`;
+                chip.addEventListener('click', () => {
+                    if (activeApps.has(a)) activeApps.delete(a); else activeApps.add(a);
+                    renderFilterChips();
+                    renderRows();
+                });
+                appContainer.appendChild(chip);
+            });
+
+            envs.forEach(e => {
+                const color = envColors[e] || '#7a7a96';
+                const chip = document.createElement('button');
+                chip.className = 'gc-filter-chip' + (activeEnvs.has(e) ? ' active' : '');
+                chip.innerHTML = `<span class="gc-filter-dot" style="background:${color}"></span>${e}`;
+                chip.addEventListener('click', () => {
+                    if (activeEnvs.has(e)) activeEnvs.delete(e); else activeEnvs.add(e);
+                    renderFilterChips();
+                    renderRows();
+                });
+                envContainer.appendChild(chip);
+            });
+        };
 
         const updateSelectedUI = () => {
             const btn = vmView.querySelector('#vmCopySelected');
@@ -1515,33 +1538,51 @@ const App = (() => {
         };
 
         const renderRows = () => {
-            const filterApp = vmView.querySelector('#vmFilterApp').value;
-            const filterEnv = vmView.querySelector('#vmFilterEnv').value;
             const filterSearch = vmView.querySelector('#vmFilterSearch').value.toLowerCase();
             const tbody = vmView.querySelector('#vmListBody');
 
-            const filtered = allMachines.filter(m => {
-                if (filterApp && m.application !== filterApp) return false;
-                if (filterEnv && m.environment !== filterEnv) return false;
+            let filtered = allMachines.filter(m => {
+                if (activeApps.size > 0 && !activeApps.has(m.application)) return false;
+                if (activeEnvs.size > 0 && !activeEnvs.has(m.environment)) return false;
                 if (filterSearch && !`${m.machine_name} ${m.hostname} ${m.server_type} ${m.application} ${m.environment} ${m.instance_type || ''}`.toLowerCase().includes(filterSearch)) return false;
                 return true;
             });
+
+            // Sort
+            if (sortCol) {
+                filtered.sort((a, b) => {
+                    const va = (a[sortCol] || '').toLowerCase();
+                    const vb = (b[sortCol] || '').toLowerCase();
+                    return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+                });
+            }
             lastFiltered = filtered;
 
             vmView.querySelector('#vmFilterCount').textContent = filtered.length + ' risultati';
 
-            const typeColors = { 'Web Server': 'var(--info)', 'Application Server': 'var(--accent)', 'Database Server': 'var(--danger)' };
+            // Update sort icons
+            vmView.querySelectorAll('.vm-th-sortable').forEach(th => {
+                const icon = th.querySelector('.vm-sort-icon');
+                if (th.dataset.col === sortCol) {
+                    icon.textContent = sortAsc ? '\u25B2' : '\u25BC';
+                    th.classList.add('vm-th-sorted');
+                } else {
+                    icon.textContent = '';
+                    th.classList.remove('vm-th-sorted');
+                }
+            });
+
             tbody.innerHTML = filtered.map(m => {
-                const tc = typeColors[m.server_type] || 'var(--text-tertiary)';
+                const eColor = envColors[m.environment] || '#7a7a96';
                 const checked = selectedRows.has(m.hostname) ? 'checked' : '';
                 return `<tr class="${checked ? 'vm-row-selected' : ''}" data-hostname="${m.hostname}">
                     <td class="vm-td-check"><input type="checkbox" class="vm-row-check" data-hostname="${m.hostname}" ${checked}></td>
                     <td class="vm-cell-name vm-cell-copyable" data-copy="${m.machine_name}" title="Clicca per copiare">${m.machine_name}</td>
                     <td class="vm-cell-hostname vm-cell-copyable" data-copy="${m.hostname}" title="Clicca per copiare"><code>${m.hostname}</code></td>
                     <td class="vm-cell-app">${m.application}</td>
-                    <td class="vm-cell-env"><span class="vm-env-badge">${m.environment}</span></td>
+                    <td class="vm-cell-env"><span class="vm-env-badge" style="background:${eColor}14;color:${eColor};border-color:${eColor}30">${m.environment}</span></td>
                     <td class="vm-cell-instance"><code class="vm-instance-code">${m.instance_type || '-'}</code></td>
-                    <td><span class="vm-type-badge" style="color:${tc};background:${tc}12;border-color:${tc}30">${m.server_type.replace(' Server', '')}</span></td>
+                    <td><span class="vm-type-badge-muted">${m.server_type.replace(' Server', '')}</span></td>
                 </tr>`;
             }).join('');
 
@@ -1578,7 +1619,6 @@ const App = (() => {
                 { key: 'instance_type', label: 'Instance Type', width: 16 },
                 { key: 'server_type', label: 'Tipo', width: 20 }
             ];
-            // Auto-calculate widths
             cols.forEach(c => {
                 c.width = Math.max(c.label.length, ...machines.map(m => (m[c.key] || '-').length)) + 2;
             });
@@ -1619,9 +1659,18 @@ const App = (() => {
             renderRows();
         });
 
+        // Sortable columns
+        vmView.querySelectorAll('.vm-th-sortable').forEach(th => {
+            th.addEventListener('click', () => {
+                const col = th.dataset.col;
+                if (sortCol === col) { sortAsc = !sortAsc; }
+                else { sortCol = col; sortAsc = true; }
+                renderRows();
+            });
+        });
+
+        renderFilterChips();
         renderRows();
-        vmView.querySelector('#vmFilterApp').addEventListener('change', renderRows);
-        vmView.querySelector('#vmFilterEnv').addEventListener('change', renderRows);
         vmView.querySelector('#vmFilterSearch').addEventListener('input', renderRows);
     }
 
@@ -1638,6 +1687,7 @@ const App = (() => {
             renderHomeDashboard();
             goHome();
             gcActiveFilters.clear();
+            gcActiveEnvFilters.clear();
             DynamoService.takeSnapshot(DataManager.getSchedulesRef());
             showToast(`CSV importato: ${DataManager.machines.length} server caricati`, 'success');
         } catch { showToast('Errore nell\'importazione del CSV', 'error'); }
@@ -1707,13 +1757,72 @@ const App = (() => {
             saveBtn.classList.remove('no-changes');
             saveBtn.disabled = false;
             if (reminder) reminder.style.display = 'block';
+            startUnsavedReminder();
         } else {
             badge.style.display = 'none';
             saveBtn.classList.remove('has-changes');
             saveBtn.classList.add('no-changes');
             saveBtn.disabled = true;
             if (reminder) reminder.style.display = 'none';
+            clearUnsavedReminder();
         }
+    }
+
+    function startUnsavedReminder() {
+        if (unsavedReminderTimer) clearTimeout(unsavedReminderTimer);
+        unsavedPopupShown = false;
+        unsavedReminderTimer = setTimeout(() => {
+            const changes = DynamoService.getModifiedAppEnvs(DataManager.getSchedulesRef());
+            if (changes.length > 0 && !unsavedPopupShown) {
+                unsavedPopupShown = true;
+                showUnsavedPopup();
+            }
+        }, 10000);
+    }
+
+    function clearUnsavedReminder() {
+        if (unsavedReminderTimer) { clearTimeout(unsavedReminderTimer); unsavedReminderTimer = null; }
+        unsavedPopupShown = false;
+        const existing = document.querySelector('.unsaved-popup');
+        if (existing) existing.remove();
+    }
+
+    function showUnsavedPopup() {
+        const existing = document.querySelector('.unsaved-popup');
+        if (existing) existing.remove();
+
+        const popup = document.createElement('div');
+        popup.className = 'unsaved-popup';
+        popup.innerHTML = `
+            <div class="unsaved-popup-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            </div>
+            <div class="unsaved-popup-text">
+                <strong>Modifiche non salvate</strong>
+                <span>Premi Ctrl+S o clicca Salva per salvare</span>
+            </div>
+            <button class="unsaved-popup-save">Salva ora</button>
+            <button class="unsaved-popup-close">${SVG.x}</button>`;
+        document.body.appendChild(popup);
+
+        requestAnimationFrame(() => popup.classList.add('show'));
+
+        popup.querySelector('.unsaved-popup-save').addEventListener('click', () => {
+            popup.remove();
+            handleSaveConfig();
+        });
+        popup.querySelector('.unsaved-popup-close').addEventListener('click', () => {
+            popup.classList.remove('show');
+            setTimeout(() => popup.remove(), 300);
+        });
+
+        // Auto-dismiss after 15 seconds
+        setTimeout(() => {
+            if (popup.parentNode) {
+                popup.classList.remove('show');
+                setTimeout(() => popup.remove(), 300);
+            }
+        }, 15000);
     }
 
     async function handleSaveConfig() {
