@@ -394,21 +394,36 @@ Configura CORS sull'API Gateway per permettere le chiamate dal browser:
 
 ## Autenticazione SSO (GitHub Enterprise)
 
-Quando l'applicazione e ospitata su **GitHub Enterprise Pages** (es. `pages.github.azienda.com`), l'autenticazione avviene automaticamente tramite il cookie SSO.
+Quando l'applicazione e ospitata su **GitHub Enterprise Pages** (es. `pages.github.azienda.com`), l'autenticazione avviene automaticamente tramite la GitHub Enterprise REST API.
 
 ### Come Funziona
 
 1. L'utente accede a GitHub Enterprise e si autentica tramite SSO (PingID, Okta, Azure AD, ecc.)
-2. GitHub Enterprise imposta il cookie `dotcom_user` sul dominio `.github.azienda.com`
-3. All'apertura dell'app, il JavaScript legge il cookie `dotcom_user` dal browser
-4. Il valore del cookie (es. `stefano-serafini-consultant`) viene confrontato con il campo `github_user` in `users.json`
+2. All'apertura dell'app, il frontend chiama `GET /api/v3/user` sul dominio GHE con `credentials: 'include'`
+3. Il browser invia automaticamente i cookie di sessione (anche `HttpOnly`) e la API restituisce il profilo utente
+4. Il campo `login` della risposta viene confrontato con il campo `github_user` in `users.json`
 5. Se viene trovata una corrispondenza, l'utente e autenticato automaticamente con i permessi configurati
 6. Se non viene trovata, appare la schermata "Accesso non autorizzato"
+7. Come fallback, viene anche tentata la lettura del cookie `dotcom_user` (se non ha il flag `HttpOnly`)
+
+### Configurazione SSO
+
+In `js/app.js`, modifica `SSO_CONFIG` con il dominio del tuo GitHub Enterprise:
+
+```javascript
+const SSO_CONFIG = {
+    enabled: true,
+    gheBaseUrl: 'https://github.AZIENDA.com'  // <-- Sostituire con il dominio reale
+};
+```
+
+- **`enabled`**: `true` per ambienti con SSO, `false` per sviluppo locale
+- **`gheBaseUrl`**: Il dominio base di GitHub Enterprise (es. `https://github.tuaazienda.com`)
 
 ### Requisiti
 
-- Il cookie `dotcom_user` deve essere accessibile dal sottodominio Pages (dominio `.github.azienda.com`)
-- Il cookie **non deve** avere il flag `HttpOnly` (standard di GitHub Enterprise)
+- L'utente deve essere autenticato su GitHub Enterprise nello stesso browser
+- Il dominio Pages deve poter comunicare con il dominio GHE (CORS)
 - Ogni utente deve avere il campo `github_user` nel file `users.json`
 
 ### Configurare un Nuovo Utente
@@ -432,7 +447,15 @@ Il campo `github_user` deve corrispondere esattamente allo username GitHub Enter
 
 ### Sviluppo Locale
 
-In ambiente locale (senza cookie `dotcom_user`), l'applicazione mostra un selettore dropdown che permette di scegliere manualmente l'utente. Questo facilita il testing dei diversi ruoli senza necessita di autenticazione SSO.
+Per sviluppo locale, impostare `SSO_CONFIG.enabled = false` in `js/app.js`. Questo disabilita la verifica SSO e mostra un selettore dropdown per scegliere manualmente l'utente, facilitando il testing dei diversi ruoli.
+
+### Troubleshooting
+
+| Problema | Soluzione |
+|----------|-----------|
+| "Autenticazione SSO non riuscita" | Verificare di essere loggati su GitHub Enterprise e che `gheBaseUrl` sia corretto |
+| Errore CORS nella console | Il dominio Pages deve essere autorizzato dal CORS di GitHub Enterprise |
+| Utente non riconosciuto | Aggiungere il `github_user` corretto in `users.json` |
 
 ## Deployment
 

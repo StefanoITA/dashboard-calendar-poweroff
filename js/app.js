@@ -50,11 +50,35 @@ const App = (() => {
     };
 
     // ============================================
-    // Cookie Reader (SSO via GitHub Enterprise)
+    // SSO Configuration (GitHub Enterprise)
     // ============================================
+    const SSO_CONFIG = {
+        enabled: true,
+        gheBaseUrl: 'https://github.AZIENDA.com'  // <-- SOSTITUIRE con il dominio GitHub Enterprise reale
+    };
+
     function getCookie(name) {
         const match = document.cookie.match(new RegExp('(?:^|;\\s*)' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
         return match ? decodeURIComponent(match[1]) : null;
+    }
+
+    async function fetchGHEUser() {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        try {
+            const resp = await fetch(`${SSO_CONFIG.gheBaseUrl}/api/v3/user`, {
+                credentials: 'include',
+                signal: controller.signal
+            });
+            clearTimeout(timeout);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            return data.login || null;
+        } catch (err) {
+            clearTimeout(timeout);
+            console.warn('[SSO] GHE API fetch failed:', err.message);
+            return null;
+        }
     }
 
     // ============================================
@@ -239,27 +263,50 @@ const App = (() => {
 
         const users = DataManager.getUsers();
 
-        // SSO: try to authenticate via GitHub Enterprise cookie
-        const gheCookie = getCookie('dotcom_user');
-        if (gheCookie) {
-            const ssoUser = DataManager.findUserByGitHub(gheCookie);
+        // SSO Authentication Cascade
+        if (SSO_CONFIG.enabled) {
+            let ghUsername = null;
+
+            // 1. Try GitHub Enterprise API (/api/v3/user with session cookies)
+            ghUsername = await fetchGHEUser();
+            if (ghUsername) {
+                console.log('[SSO] Authenticated via GHE API as:', ghUsername);
+            }
+
+            // 2. Fallback: try dotcom_user cookie (works only if not HttpOnly)
+            if (!ghUsername) {
+                const gheCookie = getCookie('dotcom_user');
+                if (gheCookie) {
+                    ghUsername = gheCookie;
+                    console.log('[SSO] Authenticated via cookie as:', ghUsername);
+                }
+            }
+
+            // 3. No method worked → error
+            if (!ghUsername) {
+                console.error('[SSO] Authentication failed: no GHE API response and no cookie');
+                showUnauthorizedScreen(null, true);
+                return;
+            }
+
+            // Match against users.json
+            const ssoUser = DataManager.findUserByGitHub(ghUsername);
             if (ssoUser) {
-                // Authenticated via SSO — auto-login
                 ssoAuthenticated = true;
                 DataManager.setCurrentUser(ssoUser.id);
                 localStorage.setItem('shutdownScheduler_userId', ssoUser.id);
+                console.log('[SSO] User matched:', ssoUser.name, '(' + ssoUser.role + ')');
             } else {
-                // Cookie present but user not in users.json → unauthorized
-                showUnauthorizedScreen(gheCookie);
+                showUnauthorizedScreen(ghUsername, false);
                 return;
             }
         } else {
-            // No SSO cookie → fallback to manual user selector (local dev)
+            // SSO disabled → local development mode with manual user selector
             const savedUserId = localStorage.getItem('shutdownScheduler_userId');
             const matchedUser = users.find(u => u.id === savedUserId);
 
             if (savedUserId && !matchedUser) {
-                showUnauthorizedScreen(savedUserId);
+                showUnauthorizedScreen(savedUserId, false);
                 return;
             }
 
@@ -293,28 +340,41 @@ const App = (() => {
     // ============================================
     // Unauthorized Screen
     // ============================================
-    function showUnauthorizedScreen(userId) {
+    function showUnauthorizedScreen(userId, ssoFailed) {
         isUnauthorized = true;
-        const isSso = !!getCookie('dotcom_user');
         const overlay = document.createElement('div');
         overlay.className = 'unauthorized-overlay';
+
+        let title, message, sub, actions;
+        if (ssoFailed) {
+            // SSO enabled but could not identify user at all
+            title = 'Autenticazione SSO non riuscita';
+            message = 'Non \u00e8 stato possibile identificare l\'utente tramite GitHub Enterprise.';
+            sub = `Verificare di aver effettuato il login su <strong>${SSO_CONFIG.gheBaseUrl.replace('https://', '')}</strong> e che la sessione sia attiva.<br>Se il problema persiste, verificare che CORS sia configurato correttamente per il dominio Pages.`;
+            actions = '<button class="btn-primary" onclick="location.reload();">Riprova</button>';
+        } else if (userId && SSO_CONFIG.enabled) {
+            // SSO worked but user not in users.json
+            title = 'Accesso non autorizzato';
+            message = `L'utenza GitHub Enterprise <strong>${userId}</strong> non \u00e8 associata a nessun profilo in questa applicazione.`;
+            sub = 'Richiedere a un amministratore di aggiungere il proprio <code>github_user</code> nel file <code>users.json</code>.';
+            actions = '';
+        } else {
+            // Local mode — unknown user ID
+            title = 'Accesso non autorizzato';
+            message = `L'utenza <strong>${userId || 'sconosciuta'}</strong> non \u00e8 abilitata all'utilizzo di questa applicazione.`;
+            sub = 'Contattare un amministratore per richiedere l\'accesso al sistema.';
+            actions = '<button class="btn-primary" onclick="localStorage.removeItem(\'shutdownScheduler_userId\');location.reload();">Cambia Utente</button>';
+        }
+
         overlay.innerHTML = `
             <div class="unauthorized-card">
                 <div class="unauthorized-icon">
                     ${SVG.lock}
                 </div>
-                <h2>Accesso non autorizzato</h2>
-                <p>${isSso
-                    ? `L'utenza GitHub Enterprise <strong>${userId}</strong> non \u00e8 associata a nessun profilo in questa applicazione.`
-                    : `L'utenza <strong>${userId || 'sconosciuta'}</strong> non \u00e8 abilitata all'utilizzo di questa applicazione.`
-                }</p>
-                <p class="unauthorized-sub">${isSso
-                    ? 'Richiedere a un amministratore di aggiungere il proprio <code>github_user</code> nel file <code>users.json</code>.'
-                    : 'Contattare un amministratore per richiedere l\'accesso al sistema.'
-                }</p>
-                <div class="unauthorized-actions">
-                    ${isSso ? '' : '<button class="btn-primary" onclick="localStorage.removeItem(\'shutdownScheduler_userId\');location.reload();">Cambia Utente</button>'}
-                </div>
+                <h2>${title}</h2>
+                <p>${message}</p>
+                <p class="unauthorized-sub">${sub}</p>
+                <div class="unauthorized-actions">${actions}</div>
                 <div class="unauthorized-contact">
                     <span>Amministratore: mario.rossi@company.it</span>
                 </div>
