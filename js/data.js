@@ -1,9 +1,11 @@
 /* ============================================
    Data Layer — CSV Parsing & State Management
+   Multi-entry schedule system
    ============================================ */
 
 const DataManager = (() => {
     let machines = [];
+    // schedules: { "app|env|hostname": [ {id, type, startTime, stopTime, recurring, dates}, ... ] }
     let schedules = {};
 
     function parseCSV(text) {
@@ -33,6 +35,10 @@ const DataManager = (() => {
         }
         values.push(current);
         return values;
+    }
+
+    function generateId() {
+        return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
     }
 
     async function loadFromFile(file) {
@@ -95,25 +101,54 @@ const DataManager = (() => {
         return `${appName}|${envName}|${hostname}`;
     }
 
-    function getSchedule(appName, envName, hostname) {
-        return schedules[scheduleKey(appName, envName, hostname)] || null;
+    // Returns array of entries for a machine
+    function getScheduleEntries(appName, envName, hostname) {
+        const key = scheduleKey(appName, envName, hostname);
+        return schedules[key] || [];
     }
 
-    function setSchedule(appName, envName, hostname, schedule) {
-        schedules[scheduleKey(appName, envName, hostname)] = schedule;
+    // Add a new entry
+    function addScheduleEntry(appName, envName, hostname, entry) {
+        const key = scheduleKey(appName, envName, hostname);
+        if (!schedules[key]) schedules[key] = [];
+        entry.id = generateId();
+        schedules[key].push(entry);
+        saveSchedulesToStorage();
+        return entry.id;
+    }
+
+    // Update an existing entry by id
+    function updateScheduleEntry(appName, envName, hostname, entryId, entry) {
+        const key = scheduleKey(appName, envName, hostname);
+        if (!schedules[key]) return;
+        const idx = schedules[key].findIndex(e => e.id === entryId);
+        if (idx !== -1) {
+            entry.id = entryId;
+            schedules[key][idx] = entry;
+            saveSchedulesToStorage();
+        }
+    }
+
+    // Remove a single entry by id
+    function removeScheduleEntry(appName, envName, hostname, entryId) {
+        const key = scheduleKey(appName, envName, hostname);
+        if (!schedules[key]) return;
+        schedules[key] = schedules[key].filter(e => e.id !== entryId);
+        if (schedules[key].length === 0) delete schedules[key];
         saveSchedulesToStorage();
     }
 
-    function setScheduleForEnv(appName, envName, schedule) {
-        getMachines(appName, envName).forEach(m => {
-            schedules[scheduleKey(appName, envName, m.hostname)] = { ...schedule };
-        });
-        saveSchedulesToStorage();
-    }
-
-    function removeSchedule(appName, envName, hostname) {
+    // Remove all entries for a machine
+    function removeAllSchedules(appName, envName, hostname) {
         delete schedules[scheduleKey(appName, envName, hostname)];
         saveSchedulesToStorage();
+    }
+
+    // Add entry to all machines in an environment
+    function addEntryForEnv(appName, envName, entry) {
+        getMachines(appName, envName).forEach(m => {
+            addScheduleEntry(appName, envName, m.hostname, { ...entry });
+        });
     }
 
     function saveSchedulesToStorage() {
@@ -124,27 +159,53 @@ const DataManager = (() => {
     function loadSchedulesFromStorage() {
         try {
             const saved = localStorage.getItem('shutdownScheduler_schedules');
-            if (saved) schedules = JSON.parse(saved);
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                // Migration: convert old single-object format to array format
+                for (const key of Object.keys(parsed)) {
+                    if (parsed[key] && !Array.isArray(parsed[key])) {
+                        const old = parsed[key];
+                        old.id = old.id || generateId();
+                        parsed[key] = [old];
+                    }
+                }
+                schedules = parsed;
+            }
         } catch (e) { console.warn('Could not load from localStorage', e); }
     }
 
     function exportSchedules() {
         const result = [];
-        for (const [key, schedule] of Object.entries(schedules)) {
+        for (const [key, entries] of Object.entries(schedules)) {
             const [app, env, hostname] = key.split('|');
             const machine = machines.find(m => m.application === app && m.environment === env && m.hostname === hostname);
-            result.push({
-                application: app,
-                environment: env,
-                machine_name: machine ? machine.machine_name : '',
-                hostname,
-                server_type: machine ? machine.server_type : '',
-                description: machine ? (machine.description || '') : '',
-                schedule_type: schedule.type,
-                recurring: schedule.recurring || 'none',
-                start_time: schedule.startTime || '',
-                stop_time: schedule.stopTime || '',
-                dates: schedule.dates || []
+            entries.forEach(entry => {
+                result.push({
+                    application: app,
+                    environment: env,
+                    machine_name: machine ? machine.machine_name : '',
+                    hostname,
+                    server_type: machine ? machine.server_type : '',
+                    description: machine ? (machine.description || '') : '',
+                    entry_id: entry.id,
+                    schedule_type: entry.type,
+                    recurring: entry.recurring || 'none',
+                    start_time: entry.startTime || '',
+                    stop_time: entry.stopTime || '',
+                    dates: entry.dates || []
+                });
+            });
+        }
+        return result;
+    }
+
+    function getAllSchedulesFlat() {
+        const result = [];
+        for (const [key, entries] of Object.entries(schedules)) {
+            const [app, env, hostname] = key.split('|');
+            const machine = machines.find(m => m.application === app && m.environment === env && m.hostname === hostname);
+            entries.forEach(entry => {
+                result.push({ app, env, hostname, machine, entry });
             });
         }
         return result;
@@ -161,13 +222,17 @@ const DataManager = (() => {
     }
 
     function envHasSchedules(appName, envName) {
-        return getMachines(appName, envName).some(m => schedules[scheduleKey(appName, envName, m.hostname)]);
+        return getMachines(appName, envName).some(m => {
+            const entries = schedules[scheduleKey(appName, envName, m.hostname)];
+            return entries && entries.length > 0;
+        });
     }
 
     return {
         loadFromFile, loadFromPath, getApplications, getEnvironments, getMachines,
-        getSchedule, setSchedule, setScheduleForEnv, removeSchedule,
-        exportSchedules, getStats, envHasSchedules,
+        getScheduleEntries, addScheduleEntry, updateScheduleEntry, removeScheduleEntry,
+        removeAllSchedules, addEntryForEnv,
+        exportSchedules, getAllSchedulesFlat, getStats, envHasSchedules,
         get machines() { return machines; }
     };
 })();

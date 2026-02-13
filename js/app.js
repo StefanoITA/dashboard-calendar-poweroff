@@ -6,10 +6,12 @@ const App = (() => {
     let currentApp = null;
     let currentEnv = null;
     let modalTarget = null;
+    let editingEntryId = null;
     let calendarDate = new Date();
     let selectedDates = new Set();
     let currentScheduleType = 'window';
     let currentRecurring = 'none';
+    let currentView = 'home'; // 'home' | 'machines' | 'general-calendar'
 
     const $ = (sel) => document.querySelector(sel);
     const $$ = (sel) => document.querySelectorAll(sel);
@@ -66,6 +68,8 @@ const App = (() => {
 
     function bindEvents() {
         $('#themeToggle').addEventListener('click', toggleTheme);
+        $('#homeBtn').addEventListener('click', goHome);
+        $('#generalCalendarBtn').addEventListener('click', showGeneralCalendar);
         $('#importCsvBtn').addEventListener('click', () => $('#csvFileInput').click());
         $('#csvFileInput').addEventListener('change', handleCSVImport);
         $('#exportBtn').addEventListener('click', handleExport);
@@ -87,7 +91,6 @@ const App = (() => {
             });
         });
 
-        // Recurring radio buttons
         $$('input[name="recurring"]').forEach(radio => {
             radio.addEventListener('change', () => {
                 currentRecurring = radio.value;
@@ -100,6 +103,10 @@ const App = (() => {
         $('#selectWeekdays').addEventListener('click', selectWeekdays);
         $('#clearSelection').addEventListener('click', () => { selectedDates.clear(); renderCalendar(); });
 
+        // General calendar navigation
+        $('#gcPrevMonth').addEventListener('click', () => navigateGeneralCalendar(-1));
+        $('#gcNextMonth').addEventListener('click', () => navigateGeneralCalendar(1));
+
         document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
     }
 
@@ -110,6 +117,32 @@ const App = (() => {
         } else {
             cal.classList.add('hidden');
         }
+    }
+
+    // ============================================
+    // Navigation
+    // ============================================
+    function goHome() {
+        currentApp = null;
+        currentEnv = null;
+        currentView = 'home';
+        $$('#appList .nav-item').forEach(i => i.classList.remove('active'));
+        $$('#envList .nav-item').forEach(i => i.classList.remove('active'));
+        $('#envSection').style.display = 'none';
+        $('#welcomeScreen').style.display = 'flex';
+        $('#machinesView').style.display = 'none';
+        $('#generalCalendarView').style.display = 'none';
+        $('#exportBtn').style.display = 'none';
+        updateBreadcrumb();
+        renderWelcomeStats();
+    }
+
+    function showView(view) {
+        currentView = view;
+        $('#welcomeScreen').style.display = view === 'home' ? 'flex' : 'none';
+        $('#machinesView').style.display = view === 'machines' ? 'block' : 'none';
+        $('#generalCalendarView').style.display = view === 'general-calendar' ? 'block' : 'none';
+        $('#exportBtn').style.display = (view === 'machines' || view === 'general-calendar') ? 'inline-flex' : 'none';
     }
 
     // ============================================
@@ -146,9 +179,7 @@ const App = (() => {
         renderEnvList(appName);
         $('#envSection').style.display = 'block';
         updateBreadcrumb(appName);
-        $('#welcomeScreen').style.display = 'flex';
-        $('#machinesView').style.display = 'none';
-        $('#exportBtn').style.display = 'none';
+        showView('home');
     }
 
     // ============================================
@@ -178,9 +209,7 @@ const App = (() => {
         $$('#envList .nav-item').forEach(item => item.classList.toggle('active', item.dataset.env === envName));
         updateBreadcrumb(currentApp, envName);
         renderMachines(currentApp, envName);
-        $('#welcomeScreen').style.display = 'none';
-        $('#machinesView').style.display = 'block';
-        $('#exportBtn').style.display = 'inline-flex';
+        showView('machines');
     }
 
     // ============================================
@@ -210,7 +239,7 @@ const App = (() => {
     }
 
     // ============================================
-    // Machine Grid
+    // Machine Grid — multi-entry
     // ============================================
     function renderMachines(appName, envName) {
         const machines = DataManager.getMachines(appName, envName);
@@ -220,7 +249,7 @@ const App = (() => {
         $('#machineCount').textContent = `${machines.length} server`;
 
         machines.forEach(m => {
-            const schedule = DataManager.getSchedule(appName, envName, m.hostname);
+            const entries = DataManager.getScheduleEntries(appName, envName, m.hostname);
             const typeClass = m.server_type.includes('Web') ? 'web' : m.server_type.includes('Application') ? 'app' : 'db';
             const icon = serverIcons[m.server_type] || serverIcons['Application Server'];
             const desc = m.description || '';
@@ -241,35 +270,40 @@ const App = (() => {
                         ${m.server_type}
                     </div>
                     ${desc ? `<div class="machine-description">${desc}</div>` : ''}
-                    ${renderScheduleSummary(schedule)}
+                    <div class="entries-list" data-hostname="${m.hostname}">
+                        ${renderEntriesList(entries, m.hostname)}
+                    </div>
                 </div>
                 <div class="machine-card-footer">
-                    <button class="btn-primary schedule-btn" data-hostname="${m.hostname}">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                        ${schedule ? 'Modifica' : 'Pianifica'}
+                    <button class="btn-primary add-entry-btn" data-hostname="${m.hostname}">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        Aggiungi Pianificazione
                     </button>
-                    ${schedule ? `<button class="btn-secondary remove-schedule-btn" data-hostname="${m.hostname}" title="Rimuovi pianificazione">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                    </button>` : ''}
                 </div>`;
 
-            card.querySelector('.schedule-btn').addEventListener('click', () => openModal('machine', m.hostname));
-            const removeBtn = card.querySelector('.remove-schedule-btn');
-            if (removeBtn) {
-                removeBtn.addEventListener('click', () => {
-                    DataManager.removeSchedule(appName, envName, m.hostname);
+            // Bind add entry button
+            card.querySelector('.add-entry-btn').addEventListener('click', () => openModal('machine', m.hostname));
+
+            // Bind edit/delete buttons for each entry
+            card.querySelectorAll('.edit-entry-btn').forEach(btn => {
+                btn.addEventListener('click', () => openModal('machine', m.hostname, btn.dataset.entryId));
+            });
+            card.querySelectorAll('.delete-entry-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    DataManager.removeScheduleEntry(appName, envName, m.hostname, btn.dataset.entryId);
                     renderMachines(currentApp, currentEnv);
                     renderEnvList(currentApp);
                     renderWelcomeStats();
-                    showToast('Pianificazione rimossa', 'info');
+                    showToast('Entry rimossa', 'info');
                 });
-            }
+            });
+
             grid.appendChild(card);
         });
     }
 
-    function renderScheduleSummary(schedule) {
-        if (!schedule) {
+    function renderEntriesList(entries, hostname) {
+        if (entries.length === 0) {
             return `<div class="machine-schedule-summary">
                 <div class="schedule-badge none">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
@@ -278,38 +312,58 @@ const App = (() => {
             </div>`;
         }
 
-        const typeLabel = schedule.type === 'shutdown' ? 'Shutdown Completo' : `${schedule.startTime} — ${schedule.stopTime}`;
-        const recurring = schedule.recurring && schedule.recurring !== 'none';
-        const recLabel = recurring ? recurringLabels[schedule.recurring] : '';
-        const dateCount = schedule.dates ? schedule.dates.length : 0;
-        const detailLine = recurring
-            ? `Ricorrente: <strong>${recLabel}</strong>`
-            : `${dateCount} giorn${dateCount === 1 ? 'o' : 'i'} selezionat${dateCount === 1 ? 'o' : 'i'}`;
+        return entries.map(entry => {
+            const typeLabel = entry.type === 'shutdown' ? 'Shutdown Completo' : `${entry.startTime} — ${entry.stopTime}`;
+            const recurring = entry.recurring && entry.recurring !== 'none';
+            const recLabel = recurring ? recurringLabels[entry.recurring] : '';
+            const dateCount = entry.dates ? entry.dates.length : 0;
+            const detailLine = recurring
+                ? `Ricorrente: <strong>${recLabel}</strong>`
+                : `${dateCount} giorn${dateCount === 1 ? 'o' : 'i'} selezionat${dateCount === 1 ? 'o' : 'i'}`;
 
-        return `<div class="machine-schedule-summary">
-            <div class="schedule-badge active">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                Pianificato
-            </div>
-            <div class="schedule-info"><strong>${typeLabel}</strong><br>${detailLine}</div>
-        </div>`;
+            return `<div class="schedule-entry-item">
+                <div class="schedule-entry-info">
+                    <div class="schedule-badge active">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                        ${typeLabel}
+                    </div>
+                    <div class="schedule-info">${detailLine}</div>
+                </div>
+                <div class="schedule-entry-actions">
+                    <button class="btn-entry-action edit-entry-btn" data-entry-id="${entry.id}" data-hostname="${hostname}" title="Modifica">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    </button>
+                    <button class="btn-entry-action delete-entry-btn" data-entry-id="${entry.id}" data-hostname="${hostname}" title="Elimina">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                    </button>
+                </div>
+            </div>`;
+        }).join('');
     }
 
     // ============================================
     // Modal
     // ============================================
-    function openModal(type, hostname) {
+    function openModal(type, hostname, entryId) {
         modalTarget = { type, app: currentApp, env: currentEnv, hostname: hostname || null };
+        editingEntryId = entryId || null;
 
         if (type === 'machine') {
             const machine = DataManager.getMachines(currentApp, currentEnv).find(m => m.hostname === hostname);
-            $('#modalTitle').textContent = 'Pianifica Spegnimento';
+            $('#modalTitle').textContent = entryId ? 'Modifica Pianificazione' : 'Nuova Pianificazione';
             $('#modalTarget').innerHTML = `<strong>${machine.machine_name}</strong> — ${machine.hostname} (${machine.server_type})`;
-            loadScheduleIntoModal(DataManager.getSchedule(currentApp, currentEnv, hostname));
+
+            if (entryId) {
+                const entries = DataManager.getScheduleEntries(currentApp, currentEnv, hostname);
+                const entry = entries.find(e => e.id === entryId);
+                loadEntryIntoModal(entry);
+            } else {
+                loadEntryIntoModal(null);
+            }
         } else {
             $('#modalTitle').textContent = 'Pianifica Intero Ambiente';
             $('#modalTarget').innerHTML = `<strong>${currentApp}</strong> — ${currentEnv} (tutti i server)`;
-            loadScheduleIntoModal(null);
+            loadEntryIntoModal(null);
         }
 
         calendarDate = new Date();
@@ -323,20 +377,21 @@ const App = (() => {
         $('#scheduleModal').style.display = 'none';
         document.body.style.overflow = '';
         modalTarget = null;
+        editingEntryId = null;
         selectedDates.clear();
     }
 
-    function loadScheduleIntoModal(schedule) {
-        if (schedule) {
-            currentScheduleType = schedule.type;
-            currentRecurring = schedule.recurring || 'none';
-            $$('.schedule-type-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.type === schedule.type));
-            $('#timeWindowConfig').style.display = schedule.type === 'window' ? 'block' : 'none';
-            if (schedule.startTime) $('#startTime').value = schedule.startTime;
-            if (schedule.stopTime) $('#stopTime').value = schedule.stopTime;
+    function loadEntryIntoModal(entry) {
+        if (entry) {
+            currentScheduleType = entry.type;
+            currentRecurring = entry.recurring || 'none';
+            $$('.schedule-type-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.type === entry.type));
+            $('#timeWindowConfig').style.display = entry.type === 'window' ? 'block' : 'none';
+            if (entry.startTime) $('#startTime').value = entry.startTime;
+            if (entry.stopTime) $('#stopTime').value = entry.stopTime;
             $$('input[name="recurring"]').forEach(r => { r.checked = r.value === currentRecurring; });
             selectedDates.clear();
-            if (schedule.dates) schedule.dates.forEach(d => selectedDates.add(d));
+            if (entry.dates) entry.dates.forEach(d => selectedDates.add(d));
         } else {
             currentScheduleType = 'window';
             currentRecurring = 'none';
@@ -355,7 +410,7 @@ const App = (() => {
             return;
         }
 
-        const schedule = {
+        const entry = {
             type: currentScheduleType,
             startTime: currentScheduleType === 'window' ? $('#startTime').value : null,
             stopTime: currentScheduleType === 'window' ? $('#stopTime').value : null,
@@ -364,10 +419,15 @@ const App = (() => {
         };
 
         if (modalTarget.type === 'machine') {
-            DataManager.setSchedule(modalTarget.app, modalTarget.env, modalTarget.hostname, schedule);
-            showToast('Pianificazione salvata', 'success');
+            if (editingEntryId) {
+                DataManager.updateScheduleEntry(modalTarget.app, modalTarget.env, modalTarget.hostname, editingEntryId, entry);
+                showToast('Pianificazione aggiornata', 'success');
+            } else {
+                DataManager.addScheduleEntry(modalTarget.app, modalTarget.env, modalTarget.hostname, entry);
+                showToast('Pianificazione aggiunta', 'success');
+            }
         } else {
-            DataManager.setScheduleForEnv(modalTarget.app, modalTarget.env, schedule);
+            DataManager.addEntryForEnv(modalTarget.app, modalTarget.env, entry);
             showToast('Pianificazione applicata a tutto l\'ambiente', 'success');
         }
 
@@ -378,7 +438,7 @@ const App = (() => {
     }
 
     // ============================================
-    // Calendar
+    // Calendar (Modal) — optimized, no lag
     // ============================================
     function renderCalendar() {
         const year = calendarDate.getFullYear();
@@ -388,21 +448,23 @@ const App = (() => {
         $('#calendarMonthYear').textContent = `${monthNames[month]} ${year}`;
 
         const grid = $('#calendarGrid');
-        grid.innerHTML = '';
         let startDow = new Date(year, month, 1).getDay();
         startDow = startDow === 0 ? 6 : startDow - 1;
         const daysInMonth = new Date(year, month + 1, 0).getDate();
         const today = new Date(); today.setHours(0, 0, 0, 0);
 
+        // Build entire grid as a document fragment for performance
+        const fragment = document.createDocumentFragment();
+
         for (let i = 0; i < startDow; i++) {
             const cell = document.createElement('div');
             cell.className = 'calendar-day empty';
-            grid.appendChild(cell);
+            fragment.appendChild(cell);
         }
 
         for (let d = 1; d <= daysInMonth; d++) {
             const date = new Date(year, month, d);
-            const dateStr = formatDate(date);
+            const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
             const dow = date.getDay();
             const isPast = date < today;
             const isToday = date.getTime() === today.getTime();
@@ -417,25 +479,33 @@ const App = (() => {
             if (isSelected) cls += ' selected';
             cell.className = cls;
             cell.textContent = d;
+            cell.dataset.date = dateStr;
 
             if (!isPast) {
-                cell.addEventListener('click', () => {
-                    if (selectedDates.has(dateStr)) selectedDates.delete(dateStr);
-                    else selectedDates.add(dateStr);
-                    renderCalendar();
-                });
+                cell.addEventListener('click', toggleDate);
             }
-            grid.appendChild(cell);
+            fragment.appendChild(cell);
+        }
+
+        grid.innerHTML = '';
+        grid.appendChild(fragment);
+    }
+
+    function toggleDate(e) {
+        const dateStr = e.currentTarget.dataset.date;
+        const cell = e.currentTarget;
+        if (selectedDates.has(dateStr)) {
+            selectedDates.delete(dateStr);
+            cell.classList.remove('selected');
+        } else {
+            selectedDates.add(dateStr);
+            cell.classList.add('selected');
         }
     }
 
     function navigateMonth(delta) {
         calendarDate.setMonth(calendarDate.getMonth() + delta);
         renderCalendar();
-    }
-
-    function formatDate(date) {
-        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
     }
 
     function selectWeekdays() {
@@ -447,9 +517,138 @@ const App = (() => {
             const date = new Date(year, month, d);
             if (date < today) continue;
             const dow = date.getDay();
-            if (dow >= 1 && dow <= 5) selectedDates.add(formatDate(date));
+            if (dow >= 1 && dow <= 5) {
+                selectedDates.add(`${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
+            }
         }
         renderCalendar();
+    }
+
+    // ============================================
+    // General Calendar View
+    // ============================================
+    let gcDate = new Date();
+
+    function showGeneralCalendar() {
+        currentView = 'general-calendar';
+        showView('general-calendar');
+        updateBreadcrumb();
+        $('#breadcrumb').innerHTML = '<span class="breadcrumb-item active">Calendario Generale</span>';
+        renderGeneralCalendar();
+    }
+
+    function navigateGeneralCalendar(delta) {
+        gcDate.setMonth(gcDate.getMonth() + delta);
+        renderGeneralCalendar();
+    }
+
+    function renderGeneralCalendar() {
+        const year = gcDate.getFullYear();
+        const month = gcDate.getMonth();
+        const monthNames = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
+                            'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
+        $('#gcMonthYear').textContent = `${monthNames[month]} ${year}`;
+
+        const allSchedules = DataManager.getAllSchedulesFlat();
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        let startDow = new Date(year, month, 1).getDay();
+        startDow = startDow === 0 ? 6 : startDow - 1;
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+
+        // Build a map: dateStr -> Set of "App - Env"
+        const dateMap = {};
+        for (let d = 1; d <= daysInMonth; d++) {
+            const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+            dateMap[dateStr] = new Map(); // appEnv -> count
+        }
+
+        const dayOfWeekForDate = (dateStr) => {
+            const d = new Date(dateStr + 'T00:00:00');
+            return d.getDay();
+        };
+
+        allSchedules.forEach(({ app, env, entry }) => {
+            const key = `${app} - ${env}`;
+            if (entry.recurring === 'daily') {
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                    if (!dateMap[dateStr]) continue;
+                    dateMap[dateStr].set(key, (dateMap[dateStr].get(key) || 0) + 1);
+                }
+            } else if (entry.recurring === 'weekdays') {
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                    const dow = dayOfWeekForDate(dateStr);
+                    if (dow >= 1 && dow <= 5) {
+                        if (!dateMap[dateStr]) continue;
+                        dateMap[dateStr].set(key, (dateMap[dateStr].get(key) || 0) + 1);
+                    }
+                }
+            } else if (entry.recurring === 'weekends') {
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                    const dow = dayOfWeekForDate(dateStr);
+                    if (dow === 0 || dow === 6) {
+                        if (!dateMap[dateStr]) continue;
+                        dateMap[dateStr].set(key, (dateMap[dateStr].get(key) || 0) + 1);
+                    }
+                }
+            } else if (entry.dates) {
+                entry.dates.forEach(dateStr => {
+                    if (dateMap[dateStr]) {
+                        dateMap[dateStr].set(key, (dateMap[dateStr].get(key) || 0) + 1);
+                    }
+                });
+            }
+        });
+
+        // Assign colors to app-env combinations
+        const allAppEnvs = new Set();
+        Object.values(dateMap).forEach(map => map.forEach((_, key) => allAppEnvs.add(key)));
+        const appEnvColors = {};
+        let ci = 0;
+        allAppEnvs.forEach(key => {
+            appEnvColors[key] = appColors[ci % appColors.length];
+            ci++;
+        });
+
+        const grid = $('#gcGrid');
+        const fragment = document.createDocumentFragment();
+
+        // Empty cells for padding
+        for (let i = 0; i < startDow; i++) {
+            const cell = document.createElement('div');
+            cell.className = 'gc-day gc-empty';
+            fragment.appendChild(cell);
+        }
+
+        for (let d = 1; d <= daysInMonth; d++) {
+            const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+            const date = new Date(year, month, d);
+            const isToday = date.getTime() === today.getTime();
+            const isPast = date < today;
+            const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+            const appEnvMap = dateMap[dateStr];
+
+            const cell = document.createElement('div');
+            cell.className = 'gc-day';
+            if (isToday) cell.classList.add('gc-today');
+            if (isPast) cell.classList.add('gc-past');
+            if (isWeekend) cell.classList.add('gc-weekend');
+            if (appEnvMap.size > 0) cell.classList.add('gc-has-entries');
+
+            let tagsHtml = '';
+            appEnvMap.forEach((count, key) => {
+                const color = appEnvColors[key];
+                tagsHtml += `<span class="gc-tag" style="background:${color}20;color:${color};border-color:${color}40" title="${key}: ${count} server">${key} <small>(${count})</small></span>`;
+            });
+
+            cell.innerHTML = `<div class="gc-day-number">${d}</div><div class="gc-tags">${tagsHtml}</div>`;
+            fragment.appendChild(cell);
+        }
+
+        grid.innerHTML = '';
+        grid.appendChild(fragment);
     }
 
     // ============================================
@@ -462,12 +661,7 @@ const App = (() => {
             await DataManager.loadFromFile(file);
             renderAppList();
             renderWelcomeStats();
-            currentApp = null;
-            currentEnv = null;
-            $('#envSection').style.display = 'none';
-            $('#welcomeScreen').style.display = 'flex';
-            $('#machinesView').style.display = 'none';
-            updateBreadcrumb();
+            goHome();
             showToast(`CSV importato: ${DataManager.machines.length} server caricati`, 'success');
         } catch (err) {
             showToast('Errore nell\'importazione del CSV', 'error');

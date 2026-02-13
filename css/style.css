@@ -156,6 +156,36 @@ body {
 
 .logo svg { color: var(--accent); }
 
+.sidebar-nav-actions {
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.sidebar-action-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 12px;
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    border: 1px solid transparent;
+    font-size: 0.88rem;
+    background: transparent;
+    font-family: var(--font);
+    width: 100%;
+    text-align: left;
+}
+
+.sidebar-action-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
 .sidebar-section {
     padding: 14px 12px;
     flex: 1;
@@ -437,6 +467,40 @@ body {
     border-color: var(--danger);
 }
 
+/* Entry action buttons */
+.btn-entry-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    background: transparent;
+    color: var(--text-tertiary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.btn-entry-action:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    border-color: var(--border-default);
+}
+
+.btn-entry-action.delete-entry-btn:hover {
+    background: var(--danger-subtle);
+    color: var(--danger);
+    border-color: var(--danger);
+}
+
+.btn-entry-action.edit-entry-btn:hover {
+    background: var(--accent-subtle);
+    color: var(--accent);
+    border-color: var(--accent-border);
+}
+
 /* ============================================
    Welcome Screen
    ============================================ */
@@ -633,6 +697,35 @@ body {
     line-height: 1.4;
 }
 
+/* Schedule entry items */
+.schedule-entry-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-subtle);
+    margin-top: 4px;
+    transition: border-color var(--transition-fast);
+}
+
+.schedule-entry-item:hover {
+    border-color: var(--border-default);
+}
+
+.schedule-entry-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.schedule-entry-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
 .machine-schedule-summary {
     margin-top: 4px;
     padding: 10px 12px;
@@ -786,7 +879,7 @@ body {
     color: var(--accent);
 }
 
-/* Time Window */
+/* Time Window — 24H format */
 .time-row {
     display: flex;
     align-items: flex-end;
@@ -909,7 +1002,7 @@ body {
 }
 
 /* ============================================
-   Calendar
+   Calendar (Modal)
    ============================================ */
 .calendar-section {
     background: var(--bg-tertiary);
@@ -955,6 +1048,7 @@ body {
     grid-template-columns: repeat(7, 1fr);
     gap: 2px;
     user-select: none;
+    contain: layout style;
 }
 
 .calendar-day {
@@ -969,16 +1063,15 @@ body {
     color: var(--text-secondary);
     border: 1px solid transparent;
     position: relative;
-    transition: background var(--transition-fast), border-color var(--transition-fast);
+    will-change: background-color, color;
+    transition: none;
 }
 
-/* Normal hover — only when NOT selected */
 .calendar-day:not(.selected):not(.empty):not(.past):hover {
     background: var(--bg-hover);
     color: var(--text-primary);
 }
 
-/* Selected state — solid, no glitch on hover */
 .calendar-day.selected {
     background: var(--accent) !important;
     color: white !important;
@@ -1009,6 +1102,146 @@ body {
     margin-top: 10px;
     align-items: center;
     justify-content: space-between;
+}
+
+/* ============================================
+   General Calendar View
+   ============================================ */
+.general-calendar-view {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+}
+
+.gc-header {
+    margin-bottom: 20px;
+}
+
+.gc-header h2 {
+    font-size: 1.35rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
+}
+
+.gc-subtitle {
+    font-size: 0.84rem;
+    color: var(--text-tertiary);
+    margin-top: 4px;
+}
+
+.gc-nav {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.gc-nav h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    min-width: 180px;
+    text-align: center;
+}
+
+.gc-weekdays {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+    margin-bottom: 4px;
+}
+
+.gc-weekdays span {
+    text-align: center;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 6px 4px;
+}
+
+.gc-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+    contain: layout style;
+}
+
+.gc-day {
+    min-height: 90px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 6px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    transition: border-color var(--transition-fast);
+}
+
+.gc-day:hover:not(.gc-empty) {
+    border-color: var(--border-strong);
+}
+
+.gc-day.gc-empty {
+    background: transparent;
+    border-color: transparent;
+}
+
+.gc-day.gc-today {
+    border-color: var(--accent-border);
+    box-shadow: 0 0 0 1px var(--accent-border);
+}
+
+.gc-day.gc-past {
+    opacity: 0.5;
+}
+
+.gc-day.gc-weekend {
+    background: var(--bg-tertiary);
+}
+
+.gc-day.gc-has-entries {
+    border-color: var(--border-default);
+}
+
+.gc-day-number {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 2px;
+}
+
+.gc-today .gc-day-number {
+    color: var(--accent);
+}
+
+.gc-tags {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow: hidden;
+}
+
+.gc-tag {
+    display: inline-block;
+    font-size: 0.62rem;
+    font-weight: 600;
+    padding: 2px 5px;
+    border-radius: 4px;
+    border: 1px solid;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.4;
+}
+
+.gc-tag small {
+    font-weight: 400;
+    opacity: 0.8;
 }
 
 /* ============================================
@@ -1058,6 +1291,9 @@ body {
     .sidebar.open { transform: translateX(0); box-shadow: var(--shadow-lg); }
     .main-content { margin-left: 0; }
     .machine-grid { grid-template-columns: 1fr; }
+    .gc-grid { grid-template-columns: repeat(7, 1fr); }
+    .gc-day { min-height: 60px; padding: 4px; }
+    .gc-tag { font-size: 0.55rem; padding: 1px 3px; }
 
     .modal {
         max-width: 100%;
@@ -1077,6 +1313,7 @@ body {
     .topbar { padding: 0 16px; }
     .welcome-screen { padding: 24px; }
     .welcome-screen h1 { font-size: 1.4rem; }
+    .general-calendar-view { padding: 16px; }
 }
 
 .sidebar-backdrop {
