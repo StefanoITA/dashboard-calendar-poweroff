@@ -1,0 +1,49 @@
+{
+  "messages": [
+    {
+      "id": "msg1",
+      "type": "warning",
+      "title": "Manutenzione programmata",
+      "text": "Sabato 15 Febbraio dalle 22:00 alle 06:00 è prevista una manutenzione straordinaria su tutti gli ambienti di Produzione. I server verranno riavviati in sequenza.",
+      "target": "*",
+      "date": "2026-02-13",
+      "expires": "2026-02-16"
+    },
+    {
+      "id": "msg2",
+      "type": "info",
+      "title": "Nuova policy spegnimento ambienti Dev",
+      "text": "A partire dal 1° Marzo, tutti gli ambienti di Development dovranno essere spenti entro le 20:00 nei giorni feriali e restare spenti nel weekend. Aggiornare le pianificazioni di conseguenza.",
+      "target": "*",
+      "date": "2026-02-10",
+      "expires": "2026-03-01"
+    },
+    {
+      "id": "msg3",
+      "type": "success",
+      "title": "Migrazione DB completata",
+      "text": "Il database di Produzione per ERP Finance è stato migrato con successo a SQL Server 2022 CU15. Nessuna azione richiesta.",
+      "target": ["anna.verdi", "mario.rossi"],
+      "date": "2026-02-12",
+      "expires": "2026-02-20"
+    },
+    {
+      "id": "msg4",
+      "type": "info",
+      "title": "Nuovo ambiente Training disponibile",
+      "text": "È stato configurato un nuovo ambiente di Training per la Piattaforma E-Commerce. Contattare il team infrastruttura per le credenziali di accesso.",
+      "target": ["giulia.martini", "mario.rossi"],
+      "date": "2026-02-11",
+      "expires": "2026-02-28"
+    },
+    {
+      "id": "msg5",
+      "type": "warning",
+      "title": "Scadenza certificati SSL",
+      "text": "I certificati SSL per gli ambienti di Pre-Produzione del Portale Clienti scadranno il 28 Febbraio. Il rinnovo è in corso.",
+      "target": ["luca.bianchi", "mario.rossi"],
+      "date": "2026-02-13",
+      "expires": "2026-03-01"
+    }
+  ]
+}

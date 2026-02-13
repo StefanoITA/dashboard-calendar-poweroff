@@ -1,11 +1,14 @@
 /* ============================================
    Data Layer — CSV Parsing, State & Roles
+   Per-app RW/RO, Notes, Messages
    ============================================ */
 const DataManager = (() => {
     let machines = [];
     let schedules = {};
     let users = [];
     let currentUser = null;
+    let notes = {};
+    let systemMessages = [];
 
     function parseCSV(text) {
         const lines = text.trim().split('\n');
@@ -41,7 +44,7 @@ const DataManager = (() => {
     }
 
     // ============================================
-    // User & Roles
+    // User & Roles (per-app RW/RO)
     // ============================================
     async function loadUsers() {
         try {
@@ -65,14 +68,37 @@ const DataManager = (() => {
 
     function getCurrentUser() { return currentUser; }
 
+    // Check if user is globally read-only (role = Read-Only)
     function isReadOnly() {
         return currentUser && currentUser.role === 'Read-Only';
     }
 
+    // Per-app permission: 'rw', 'ro', or null (no access)
+    function getAppPermission(appName) {
+        if (!currentUser) return null;
+        if (currentUser.role === 'Admin') return 'rw';
+        if (currentUser.role === 'Read-Only') return 'ro';
+
+        const apps = currentUser.applications;
+        // Array format (legacy): ["*"] or ["App1", "App2"]
+        if (Array.isArray(apps)) {
+            if (apps.includes('*')) return currentUser.role === 'Read-Only' ? 'ro' : 'rw';
+            return apps.includes(appName) ? 'rw' : null;
+        }
+        // Object format: { "App1": "rw", "App2": "ro" }
+        if (typeof apps === 'object' && apps !== null) {
+            return apps[appName] || null;
+        }
+        return null;
+    }
+
     function canAccessApp(appName) {
-        if (!currentUser) return false;
-        if (currentUser.applications.includes('*')) return true;
-        return currentUser.applications.includes(appName);
+        return getAppPermission(appName) !== null;
+    }
+
+    function isAppReadOnly(appName) {
+        const perm = getAppPermission(appName);
+        return perm === 'ro';
     }
 
     function getAccessibleAppEnvPairs() {
@@ -96,6 +122,7 @@ const DataManager = (() => {
             reader.onload = (e) => {
                 machines = parseCSV(e.target.result);
                 loadSchedulesFromStorage();
+                loadNotesFromStorage();
                 resolve(machines);
             };
             reader.onerror = reject;
@@ -109,11 +136,40 @@ const DataManager = (() => {
             const text = await response.text();
             machines = parseCSV(text);
             loadSchedulesFromStorage();
+            loadNotesFromStorage();
             return machines;
         } catch (err) {
             console.error('Failed to load CSV:', err);
             return [];
         }
+    }
+
+    // ============================================
+    // System Messages
+    // ============================================
+    async function loadMessages() {
+        try {
+            const response = await fetch('data/messages.json');
+            const data = await response.json();
+            systemMessages = data.messages || [];
+        } catch (e) {
+            console.warn('Could not load messages.json', e);
+            systemMessages = [];
+        }
+        return systemMessages;
+    }
+
+    function getMessages() {
+        const now = new Date();
+        const userId = currentUser ? currentUser.id : null;
+        return systemMessages.filter(m => {
+            // Check expiry
+            if (m.expires && new Date(m.expires) < now) return false;
+            // Check target
+            if (m.target === '*') return true;
+            if (Array.isArray(m.target)) return m.target.includes(userId);
+            return false;
+        });
     }
 
     // ============================================
@@ -138,7 +194,6 @@ const DataManager = (() => {
         }
 
         if (hasAnyData) {
-            // Load from DynamoDB into local schedules
             for (const pair of pairs) {
                 const dynKey = DynamoService.appEnvKey(pair.app, pair.env);
                 if (items[dynKey]) {
@@ -147,7 +202,6 @@ const DataManager = (() => {
             }
             saveSchedulesToStorage();
         } else {
-            // DynamoDB is empty — push local state
             for (const pair of pairs) {
                 const data = DynamoService.extractAppEnvData(schedules, pair.app, pair.env);
                 if (Object.keys(data).length > 0) {
@@ -275,6 +329,62 @@ const DataManager = (() => {
 
     function getSchedulesRef() { return schedules; }
 
+    // ============================================
+    // Notes (per server)
+    // ============================================
+    function loadNotesFromStorage() {
+        try {
+            const saved = localStorage.getItem('shutdownScheduler_notes');
+            if (saved) notes = JSON.parse(saved);
+        } catch (e) { notes = {}; }
+    }
+
+    function saveNotesToStorage() {
+        try { localStorage.setItem('shutdownScheduler_notes', JSON.stringify(notes)); }
+        catch (e) { console.warn('Could not save notes', e); }
+    }
+
+    function getNotes(hostname) {
+        return notes[hostname] || [];
+    }
+
+    function addNote(hostname, text) {
+        if (!notes[hostname]) notes[hostname] = [];
+        const note = {
+            id: generateId(),
+            text,
+            timestamp: new Date().toISOString(),
+            user: currentUser ? currentUser.name : 'Sistema'
+        };
+        notes[hostname].push(note);
+        saveNotesToStorage();
+        return note;
+    }
+
+    function updateNote(hostname, noteId, text) {
+        if (!notes[hostname]) return;
+        const note = notes[hostname].find(n => n.id === noteId);
+        if (note) {
+            note.text = text;
+            note.editedAt = new Date().toISOString();
+            saveNotesToStorage();
+        }
+    }
+
+    function deleteNote(hostname, noteId) {
+        if (!notes[hostname]) return;
+        notes[hostname] = notes[hostname].filter(n => n.id !== noteId);
+        if (notes[hostname].length === 0) delete notes[hostname];
+        saveNotesToStorage();
+    }
+
+    function getAllNotesCount() {
+        return Object.values(notes).reduce((sum, arr) => sum + arr.length, 0);
+    }
+
+    // ============================================
+    // Export & Stats
+    // ============================================
     function exportSchedules() {
         const result = [];
         for (const [key, entries] of Object.entries(schedules)) {
@@ -313,11 +423,16 @@ const DataManager = (() => {
 
     function getStats() {
         const apps = getApplications();
+        const allApps = getApplications(true);
         return {
             applications: apps.length,
+            allApplications: allApps.length,
             environments: apps.reduce((sum, a) => sum + a.envCount, 0),
             totalMachines: machines.length,
-            scheduledMachines: Object.keys(schedules).length
+            accessibleMachines: apps.reduce((sum, a) => sum + a.machineCount, 0),
+            scheduledMachines: Object.keys(schedules).length,
+            totalSchedules: Object.values(schedules).reduce((sum, arr) => sum + arr.length, 0),
+            notesCount: getAllNotesCount()
         };
     }
 
@@ -338,14 +453,43 @@ const DataManager = (() => {
         return { total: ms.length, scheduled };
     }
 
+    // Upcoming schedules (this week)
+    function getUpcomingSchedules(daysAhead = 7) {
+        const upcoming = [];
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const endDate = new Date(today);
+        endDate.setDate(endDate.getDate() + daysAhead);
+
+        for (const [key, entries] of Object.entries(schedules)) {
+            const [app, env, hostname] = key.split('|');
+            entries.forEach(entry => {
+                if (entry.recurring && entry.recurring !== 'none') {
+                    upcoming.push({ app, env, hostname, entry, recurring: true });
+                } else if (entry.dates) {
+                    const futureDates = entry.dates.filter(d => {
+                        const date = new Date(d + 'T00:00:00');
+                        return date >= today && date <= endDate;
+                    });
+                    if (futureDates.length > 0) {
+                        upcoming.push({ app, env, hostname, entry, dates: futureDates });
+                    }
+                }
+            });
+        }
+        return upcoming;
+    }
+
     return {
-        loadFromFile, loadFromPath, loadUsers, loadFromDynamo,
-        getUsers, setCurrentUser, getCurrentUser, isReadOnly, canAccessApp, getAccessibleAppEnvPairs,
+        loadFromFile, loadFromPath, loadUsers, loadFromDynamo, loadMessages,
+        getUsers, setCurrentUser, getCurrentUser, isReadOnly, isAppReadOnly, getAppPermission,
+        canAccessApp, getAccessibleAppEnvPairs,
         getApplications, getEnvironments, getMachines,
         getScheduleEntries, addScheduleEntry, updateScheduleEntry, removeScheduleEntry,
         removeAllSchedules, addEntryForEnv,
         exportSchedules, getAllSchedulesFlat, getStats, envHasSchedules, getEnvScheduleStats,
-        getSchedulesRef,
+        getSchedulesRef, getMessages, getUpcomingSchedules,
+        getNotes, addNote, updateNote, deleteNote, getAllNotesCount,
         get machines() { return machines; }
     };
 })();

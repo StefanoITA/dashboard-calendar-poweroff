@@ -13,6 +13,7 @@ const App = (() => {
     let currentView = 'home';
     let gcDate = new Date();
     let gcActiveFilters = new Set();
+    let isUnauthorized = false;
 
     const $ = s => document.querySelector(s);
     const $$ = s => document.querySelectorAll(s);
@@ -26,7 +27,7 @@ const App = (() => {
     };
 
     const envClassMap = { 'Development':'dev','Integration':'int','Pre-Produzione':'preprod','Training':'training','Bugfixing':'bugfix','Produzione':'prod' };
-    const appColors = ['#c2410c','#7c3aed','#2563eb','#0891b2','#059669','#dc2626','#db2777','#4f46e5'];
+    const appColors = ['#c2410c','#7c3aed','#2563eb','#0891b2','#059669','#dc2626','#db2777','#4f46e5','#ca8a04'];
     const recurringLabels = { 'none':'Giorni specifici','daily':'Ogni giorno','weekdays':'Lun-Ven','weekends':'Sab-Dom' };
 
     const SVG = {
@@ -35,6 +36,11 @@ const App = (() => {
         trash: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
         upload: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
         alert: '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+        copy: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+        note: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
+        refresh: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
+        edit: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
+        lock: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
     };
 
     // ============================================
@@ -64,8 +70,6 @@ const App = (() => {
             overlay.querySelector('.confirm-cancel').addEventListener('click', () => close(false));
             overlay.querySelector('.confirm-ok').addEventListener('click', () => close(true));
             overlay.addEventListener('click', e => { if (e.target === overlay) close(false); });
-
-            // Focus the cancel button
             overlay.querySelector('.confirm-cancel').focus();
         });
     }
@@ -216,12 +220,21 @@ const App = (() => {
     async function init() {
         initTheme();
         await DataManager.loadUsers();
+        await DataManager.loadMessages();
         await DataManager.loadFromPath('data/machines.csv');
 
-        // Restore last user or default to first
+        // Check if saved user exists
         const users = DataManager.getUsers();
         const savedUserId = localStorage.getItem('shutdownScheduler_userId');
-        const defaultUser = users.find(u => u.id === savedUserId) || users[0];
+        const matchedUser = users.find(u => u.id === savedUserId);
+
+        if (savedUserId && !matchedUser) {
+            // Saved user not in users.json → unauthorized
+            showUnauthorizedScreen(savedUserId);
+            return;
+        }
+
+        const defaultUser = matchedUser || users[0];
         if (defaultUser) DataManager.setCurrentUser(defaultUser.id);
 
         renderUserSelector();
@@ -240,10 +253,35 @@ const App = (() => {
         }
 
         renderAppList();
-        renderWelcomeStats();
+        renderHomeDashboard();
         initTimePickers();
         bindEvents();
         updateChangesBadge();
+    }
+
+    // ============================================
+    // Unauthorized Screen
+    // ============================================
+    function showUnauthorizedScreen(userId) {
+        isUnauthorized = true;
+        const overlay = document.createElement('div');
+        overlay.className = 'unauthorized-overlay';
+        overlay.innerHTML = `
+            <div class="unauthorized-card">
+                <div class="unauthorized-icon">
+                    ${SVG.lock}
+                </div>
+                <h2>Accesso non autorizzato</h2>
+                <p>L'utenza <strong>${userId || 'sconosciuta'}</strong> non \u00e8 abilitata all'utilizzo di questa applicazione.</p>
+                <p class="unauthorized-sub">Contattare un amministratore per richiedere l'accesso al sistema.</p>
+                <div class="unauthorized-actions">
+                    <button class="btn-primary" onclick="localStorage.removeItem('shutdownScheduler_userId');location.reload();">Cambia Utente</button>
+                </div>
+                <div class="unauthorized-contact">
+                    <span>Amministratore: mario.rossi@company.it</span>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
     }
 
     function showConnectionError() {
@@ -266,6 +304,7 @@ const App = (() => {
         $('#exportBtn').addEventListener('click', handleExport);
         $('#auditLogBtn').addEventListener('click', showAuditPanel);
         $('#saveConfigBtn').addEventListener('click', handleSaveConfig);
+        $('#refreshBtn').addEventListener('click', handleRefresh);
         $('#applyAllBtn').addEventListener('click', () => openModal('environment'));
         $('#modalClose').addEventListener('click', closeModal);
         $('#modalCancel').addEventListener('click', closeModal);
@@ -312,16 +351,27 @@ const App = (() => {
         const panel = $('#userSelectorPanel');
 
         const roleMap = { 'Admin': 'admin', 'Application_owner': 'appowner', 'Read-Only': 'readonly' };
-        const roleLabels = { 'Admin': 'Admin', 'Application_owner': 'App Owner', 'Read-Only': 'Read-Only' };
+        const roleLabels = { 'Admin': 'Amministratore', 'Application_owner': 'Application Owner', 'Read-Only': 'Sola Lettura' };
+        const roleIcons = {
+            'Admin': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>',
+            'Application_owner': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+            'Read-Only': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'
+        };
 
         let optionsHtml = users.map(u => `<option value="${u.id}" ${current && current.id === u.id ? 'selected' : ''}>${u.name}</option>`).join('');
         const roleCls = current ? roleMap[current.role] || '' : '';
         const roleLabel = current ? roleLabels[current.role] || current.role : '';
+        const roleIcon = current ? roleIcons[current.role] || '' : '';
 
         panel.innerHTML = `
             <div class="sidebar-label">Utente Attivo</div>
             <select class="user-select" id="userSelect">${optionsHtml}</select>
-            <span class="user-role-badge ${roleCls}" id="userRoleBadge">${roleLabel}</span>`;
+            <div class="user-role-badge-container">
+                <div class="user-role-badge ${roleCls}" id="userRoleBadge">
+                    ${roleIcon}
+                    <span>${roleLabel}</span>
+                </div>
+            </div>`;
 
         $('#userSelect').addEventListener('change', e => {
             const user = DataManager.setCurrentUser(e.target.value);
@@ -329,10 +379,11 @@ const App = (() => {
             AuditLog.log('Cambio utente', `Selezionato: ${user.name} (${user.role})`);
             applyRoleMode();
             renderAppList();
-            renderWelcomeStats();
+            renderHomeDashboard();
             goHome();
             gcActiveFilters.clear();
             renderUserSelector();
+            updateChangesBadge();
         });
     }
 
@@ -362,13 +413,14 @@ const App = (() => {
         closeEnvPopover();
         showView('home');
         updateBreadcrumb();
-        renderWelcomeStats();
+        renderHomeDashboard();
         $$('.sidebar-action-btn').forEach(b => b.classList.remove('active'));
+        $('#homeBtn').classList.add('active');
     }
 
     function showView(view) {
         currentView = view;
-        $('#welcomeScreen').style.display = view === 'home' ? 'flex' : 'none';
+        $('#welcomeScreen').style.display = view === 'home' ? 'block' : 'none';
         $('#machinesView').style.display = view === 'machines' ? 'block' : 'none';
         $('#generalCalendarView').style.display = view === 'general-calendar' ? 'block' : 'none';
         $('#exportBtn').style.display = (view === 'machines' || view === 'general-calendar') ? 'inline-flex' : 'none';
@@ -423,6 +475,8 @@ const App = (() => {
         container.innerHTML = '';
         apps.forEach((app, i) => {
             const color = appColors[i % appColors.length];
+            const perm = DataManager.getAppPermission(app.name);
+            const isRo = perm === 'ro';
             const item = document.createElement('div');
             item.className = 'nav-item';
             item.dataset.app = app.name;
@@ -431,6 +485,7 @@ const App = (() => {
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
                 </div>
                 <span class="nav-label">${app.name}</span>
+                ${isRo ? '<span class="nav-ro-tag">RO</span>' : ''}
                 <span class="nav-badge">${app.machineCount}</span>`;
             item.addEventListener('click', e => {
                 e.stopPropagation();
@@ -493,21 +548,165 @@ const App = (() => {
     // ============================================
     function updateBreadcrumb(app, env) {
         const bc = $('#breadcrumb');
-        if (!app) bc.innerHTML = '<span class="breadcrumb-item active">Seleziona un\'applicazione</span>';
+        if (!app) bc.innerHTML = '<span class="breadcrumb-item active">Dashboard</span>';
         else if (!env) bc.innerHTML = `<span class="breadcrumb-item">${app}</span><span class="breadcrumb-separator">/</span><span class="breadcrumb-item active">Seleziona un ambiente</span>`;
-        else bc.innerHTML = `<span class="breadcrumb-item">${app}</span><span class="breadcrumb-separator">/</span><span class="breadcrumb-item active">${env}</span>`;
+        else {
+            const isRo = DataManager.isAppReadOnly(app) || DataManager.isReadOnly();
+            bc.innerHTML = `<span class="breadcrumb-item">${app}</span><span class="breadcrumb-separator">/</span><span class="breadcrumb-item active">${env}</span>${isRo ? '<span class="breadcrumb-ro">Sola Lettura</span>' : ''}`;
+        }
     }
 
     // ============================================
-    // Welcome Stats
+    // Home Dashboard (Rich)
     // ============================================
-    function renderWelcomeStats() {
+    function renderHomeDashboard() {
+        const screen = $('#welcomeScreen');
         const s = DataManager.getStats();
-        $('#welcomeStats').innerHTML = `
-            <div class="stat-card"><div class="stat-value">${s.applications}</div><div class="stat-label">Applicazioni</div></div>
-            <div class="stat-card"><div class="stat-value">${s.environments}</div><div class="stat-label">Ambienti</div></div>
-            <div class="stat-card"><div class="stat-value">${s.totalMachines}</div><div class="stat-label">Server</div></div>
-            <div class="stat-card"><div class="stat-value">${s.scheduledMachines}</div><div class="stat-label">Pianificati</div></div>`;
+        const messages = DataManager.getMessages();
+        const upcoming = DataManager.getUpcomingSchedules(7);
+        const recentLogs = AuditLog.getLogs().slice(0, 5);
+        const apps = DataManager.getApplications();
+
+        let html = `
+            <div class="home-header">
+                <div class="home-title">
+                    <div class="welcome-icon">
+                        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    </div>
+                    <div>
+                        <h1>Shutdown Scheduler</h1>
+                        <p class="home-subtitle">Gestione pianificazioni di spegnimento e accensione server</p>
+                    </div>
+                </div>
+                <button class="btn-secondary home-refresh-btn" id="homeRefreshBtn">
+                    ${SVG.refresh}
+                    Aggiorna Stato
+                </button>
+            </div>`;
+
+        // System Messages
+        if (messages.length > 0) {
+            html += '<div class="home-messages">';
+            messages.forEach(m => {
+                const typeIcon = m.type === 'warning' ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
+                    : m.type === 'success' ? SVG.check
+                    : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
+                html += `<div class="home-message ${m.type}">
+                    <div class="home-message-icon">${typeIcon}</div>
+                    <div class="home-message-content">
+                        <div class="home-message-title">${m.title}</div>
+                        <div class="home-message-text">${m.text}</div>
+                        <div class="home-message-date">${m.date}</div>
+                    </div>
+                </div>`;
+            });
+            html += '</div>';
+        }
+
+        // Stats Grid
+        html += `
+            <div class="home-stats">
+                <div class="stat-card"><div class="stat-value">${s.applications}</div><div class="stat-label">Applicazioni</div></div>
+                <div class="stat-card"><div class="stat-value">${s.environments}</div><div class="stat-label">Ambienti</div></div>
+                <div class="stat-card"><div class="stat-value">${s.accessibleMachines}</div><div class="stat-label">Server</div></div>
+                <div class="stat-card"><div class="stat-value">${s.scheduledMachines}</div><div class="stat-label">Pianificati</div></div>
+                <div class="stat-card"><div class="stat-value">${s.totalSchedules}</div><div class="stat-label">Regole Attive</div></div>
+                <div class="stat-card"><div class="stat-value">${s.notesCount}</div><div class="stat-label">Note</div></div>
+            </div>`;
+
+        // Two-column layout: apps + upcoming/recent
+        html += '<div class="home-columns">';
+
+        // Left: App Overview
+        html += '<div class="home-col">';
+        html += '<div class="home-section-title">Panoramica Applicazioni</div>';
+        apps.forEach((app, i) => {
+            const color = appColors[i % appColors.length];
+            const perm = DataManager.getAppPermission(app.name);
+            const permLabel = perm === 'rw' ? 'RW' : 'RO';
+            const permCls = perm === 'rw' ? 'perm-rw' : 'perm-ro';
+            const envs = DataManager.getEnvironments(app.name);
+            let scheduledEnvs = 0;
+            envs.forEach(e => { if (DataManager.envHasSchedules(app.name, e.name)) scheduledEnvs++; });
+            const progress = envs.length > 0 ? Math.round((scheduledEnvs / envs.length) * 100) : 0;
+
+            html += `<div class="home-app-card" data-app="${app.name}">
+                <div class="home-app-header">
+                    <div class="home-app-icon" style="color:${color};background:${color}12;">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                    </div>
+                    <div class="home-app-info">
+                        <div class="home-app-name">${app.name}</div>
+                        <div class="home-app-meta">${app.machineCount} server &middot; ${envs.length} ambienti</div>
+                    </div>
+                    <span class="home-app-perm ${permCls}">${permLabel}</span>
+                </div>
+                <div class="home-app-progress">
+                    <div class="home-app-progress-bar" style="width:${progress}%;background:${color}"></div>
+                </div>
+                <div class="home-app-progress-label">${scheduledEnvs}/${envs.length} ambienti configurati</div>
+            </div>`;
+        });
+        html += '</div>';
+
+        // Right: Upcoming + Recent
+        html += '<div class="home-col">';
+
+        // Upcoming schedules
+        html += '<div class="home-section-title">Prossime Pianificazioni (7 giorni)</div>';
+        if (upcoming.length === 0) {
+            html += '<div class="home-empty">Nessuna pianificazione nei prossimi 7 giorni</div>';
+        } else {
+            html += '<div class="home-upcoming">';
+            upcoming.slice(0, 8).forEach(u => {
+                const label = u.recurring ? `Ricorrente: ${recurringLabels[u.entry.recurring]}` : `${u.dates.length} giorni`;
+                const timeLabel = u.entry.type === 'shutdown' ? 'Shutdown' : `${u.entry.startTime} - ${u.entry.stopTime}`;
+                html += `<div class="home-upcoming-item">
+                    <div class="home-upcoming-dot"></div>
+                    <div class="home-upcoming-info">
+                        <div class="home-upcoming-title">${u.app} / ${u.env}</div>
+                        <div class="home-upcoming-detail">${u.hostname} &middot; ${timeLabel} &middot; ${label}</div>
+                    </div>
+                </div>`;
+            });
+            if (upcoming.length > 8) {
+                html += `<div class="home-upcoming-more">+${upcoming.length - 8} altre pianificazioni</div>`;
+            }
+            html += '</div>';
+        }
+
+        // Recent Activity
+        html += '<div class="home-section-title" style="margin-top:20px;">Attivit\u00e0 Recente</div>';
+        if (recentLogs.length === 0) {
+            html += '<div class="home-empty">Nessuna attivit\u00e0 registrata</div>';
+        } else {
+            html += '<div class="home-activity">';
+            recentLogs.forEach(l => {
+                html += `<div class="home-activity-item">
+                    <div class="home-activity-time">${AuditLog.formatTimestamp(l.timestamp)}</div>
+                    <div class="home-activity-text"><strong>${l.action}</strong> &mdash; ${l.details}</div>
+                </div>`;
+            });
+            html += '</div>';
+        }
+
+        html += '</div></div>'; // close right col + home-columns
+
+        screen.innerHTML = html;
+
+        // Bind home refresh button
+        const homeRefreshBtn = screen.querySelector('#homeRefreshBtn');
+        if (homeRefreshBtn) homeRefreshBtn.addEventListener('click', handleRefresh);
+
+        // Bind app cards to navigate
+        screen.querySelectorAll('.home-app-card').forEach(card => {
+            card.style.cursor = 'pointer';
+            card.addEventListener('click', () => {
+                const appName = card.dataset.app;
+                const item = document.querySelector(`#appList .nav-item[data-app="${appName}"]`);
+                if (item) selectApp(appName, item);
+            });
+        });
     }
 
     // ============================================
@@ -516,7 +715,7 @@ const App = (() => {
     function renderMachines(appName, envName) {
         const machines = DataManager.getMachines(appName, envName);
         const grid = $('#machineGrid');
-        const readOnly = DataManager.isReadOnly();
+        const readOnly = DataManager.isReadOnly() || DataManager.isAppReadOnly(appName);
         const stats = DataManager.getEnvScheduleStats(appName, envName);
         const hasSchedules = stats.scheduled > 0;
 
@@ -524,20 +723,40 @@ const App = (() => {
         $('#envTitle').innerHTML = `<span class="env-title-app">${appName}</span><span class="env-title-sep">/</span>${envName}`;
         $('#machineCount').innerHTML = `${machines.length} server <span class="env-stats-badge ${hasSchedules ? 'has-schedules' : ''}">${stats.scheduled}/${stats.total} pianificati</span>`;
 
-        // Search bar
-        let searchBar = document.querySelector('.machine-search-bar');
-        if (!searchBar) {
-            searchBar = document.createElement('div');
-            searchBar.className = 'machine-search-bar';
-            searchBar.innerHTML = '<input type="text" class="machine-search-input" placeholder="Cerca server per nome o hostname..." id="machineSearch">';
-            grid.parentNode.insertBefore(searchBar, grid);
+        // Search + Pianifica Ambiente row
+        let controlsRow = document.querySelector('.machine-controls-row');
+        if (!controlsRow) {
+            controlsRow = document.createElement('div');
+            controlsRow.className = 'machine-controls-row';
+            grid.parentNode.insertBefore(controlsRow, grid);
         }
-        const searchInput = searchBar.querySelector('#machineSearch');
+        controlsRow.innerHTML = `
+            <div class="machine-search-bar">
+                <input type="text" class="machine-search-input" placeholder="Cerca server per nome o hostname..." id="machineSearch">
+            </div>
+            ${!readOnly ? `<button class="btn-accent-highlight" id="planEnvBtn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                Pianifica Ambiente
+            </button>` : ''}`;
+
+        // Remove old search bar if exists
+        const oldSearchBar = document.querySelector('.machine-search-bar:not(.machine-controls-row .machine-search-bar)');
+        if (oldSearchBar) oldSearchBar.remove();
+
+        const searchInput = controlsRow.querySelector('#machineSearch');
         searchInput.value = '';
         searchInput.oninput = () => filterMachines(searchInput.value);
 
+        const planBtn = controlsRow.querySelector('#planEnvBtn');
+        if (planBtn) planBtn.addEventListener('click', () => openModal('environment'));
+
+        // Hide the original applyAllBtn
+        const origBtn = $('#applyAllBtn');
+        if (origBtn) origBtn.style.display = 'none';
+
         machines.forEach(m => {
             const entries = DataManager.getScheduleEntries(appName, envName, m.hostname);
+            const notesArr = DataManager.getNotes(m.hostname);
             const typeClass = m.server_type.includes('Web') ? 'web' : m.server_type.includes('Application') ? 'app' : 'db';
             const icon = serverIcons[m.server_type] || serverIcons['Application Server'];
             const desc = m.description || '';
@@ -550,7 +769,10 @@ const App = (() => {
                     <div class="machine-type-icon ${typeClass}">${icon}</div>
                     <div class="machine-card-title">
                         <h4>${m.machine_name}</h4>
-                        <div class="hostname" data-hostname="${m.hostname}" title="Clicca per copiare">${m.hostname}</div>
+                        <div class="hostname-row">
+                            <span class="hostname" data-hostname="${m.hostname}" title="Clicca per copiare">${m.hostname}</span>
+                            <button class="copy-btn" data-hostname="${m.hostname}" title="Copia hostname">${SVG.copy}</button>
+                        </div>
                     </div>
                 </div>
                 <div class="machine-card-body">
@@ -560,31 +782,35 @@ const App = (() => {
                     </div>
                     ${desc ? `<div class="machine-description">${desc}</div>` : ''}
                     <div class="entries-list">${renderEntriesList(entries, m.hostname, readOnly)}</div>
+                    ${renderNotesSection(m.hostname, notesArr, readOnly)}
                 </div>
                 ${!readOnly ? `<div class="machine-card-footer">
                     <button class="btn-primary add-entry-btn" data-hostname="${m.hostname}">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                         Aggiungi Pianificazione
                     </button>
+                    <button class="btn-secondary add-note-btn" data-hostname="${m.hostname}">
+                        ${SVG.note}
+                        Nota
+                    </button>
                 </div>` : ''}`;
 
-            // Copy hostname
-            card.querySelector('.hostname').addEventListener('click', async (e) => {
-                const hn = e.currentTarget.dataset.hostname;
+            // Copy hostname (both click on hostname text and copy button)
+            const copyAction = async (hn) => {
                 try {
                     await navigator.clipboard.writeText(hn);
-                    e.currentTarget.classList.add('copied');
-                    e.currentTarget.textContent = 'Copiato!';
-                    setTimeout(() => {
-                        e.currentTarget.classList.remove('copied');
-                        e.currentTarget.textContent = hn;
-                    }, 1500);
+                    showToast('Copiato negli appunti: ' + hn, 'success');
                 } catch { /* ignore */ }
-            });
+            };
+            card.querySelector('.hostname').addEventListener('click', (e) => copyAction(e.currentTarget.dataset.hostname));
+            card.querySelector('.copy-btn').addEventListener('click', (e) => copyAction(e.currentTarget.dataset.hostname));
 
             if (!readOnly) {
                 const addBtn = card.querySelector('.add-entry-btn');
                 if (addBtn) addBtn.addEventListener('click', () => openModal('machine', m.hostname));
+
+                const noteBtn = card.querySelector('.add-note-btn');
+                if (noteBtn) noteBtn.addEventListener('click', () => promptAddNote(m.hostname));
             }
 
             card.querySelectorAll('.edit-entry-btn').forEach(btn => btn.addEventListener('click', () => openModal('machine', m.hostname, btn.dataset.entryId)));
@@ -600,9 +826,27 @@ const App = (() => {
                 AuditLog.log('Eliminazione entry', `${appName} / ${envName} / ${m.hostname}`);
                 DataManager.removeScheduleEntry(appName, envName, m.hostname, btn.dataset.entryId);
                 renderMachines(currentApp, currentEnv);
-                renderWelcomeStats();
+                renderHomeDashboard();
                 updateChangesBadge();
                 showToast('Entry rimossa', 'info');
+            }));
+
+            // Note actions
+            card.querySelectorAll('.edit-note-btn').forEach(btn => btn.addEventListener('click', () => {
+                promptEditNote(m.hostname, btn.dataset.noteId);
+            }));
+            card.querySelectorAll('.delete-note-btn').forEach(btn => btn.addEventListener('click', async () => {
+                const confirmed = await confirmDialog({
+                    title: 'Eliminare nota?',
+                    message: 'Questa azione non pu\u00f2 essere annullata.',
+                    confirmLabel: 'Elimina',
+                    iconType: 'danger'
+                });
+                if (!confirmed) return;
+                DataManager.deleteNote(m.hostname, btn.dataset.noteId);
+                AuditLog.log('Nota eliminata', m.hostname);
+                renderMachines(currentApp, currentEnv);
+                showToast('Nota eliminata', 'info');
             }));
 
             grid.appendChild(card);
@@ -636,9 +880,7 @@ const App = (() => {
 
             const actionsHtml = readOnly ? '' : `
                 <div class="schedule-entry-actions">
-                    <button class="btn-entry-action edit-entry-btn" data-entry-id="${entry.id}" title="Modifica">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                    </button>
+                    <button class="btn-entry-action edit-entry-btn" data-entry-id="${entry.id}" title="Modifica">${SVG.edit}</button>
                     <button class="btn-entry-action delete-entry-btn" data-entry-id="${entry.id}" title="Elimina">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                     </button>
@@ -658,10 +900,110 @@ const App = (() => {
     }
 
     // ============================================
+    // Notes Section
+    // ============================================
+    function renderNotesSection(hostname, notesArr, readOnly) {
+        if (notesArr.length === 0) return '';
+        let html = '<div class="notes-section">';
+        html += `<div class="notes-header">${SVG.note} <span>Note (${notesArr.length})</span></div>`;
+        notesArr.forEach(n => {
+            const date = new Date(n.timestamp);
+            const timeStr = `${String(date.getDate()).padStart(2,'0')}/${String(date.getMonth()+1).padStart(2,'0')} ${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
+            html += `<div class="note-item">
+                <div class="note-content">${n.text}</div>
+                <div class="note-meta">
+                    <span>${n.user} &middot; ${timeStr}</span>
+                    ${!readOnly ? `<div class="note-actions">
+                        <button class="btn-entry-action edit-note-btn" data-note-id="${n.id}" title="Modifica">${SVG.edit}</button>
+                        <button class="btn-entry-action delete-note-btn" data-note-id="${n.id}" title="Elimina">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                        </button>
+                    </div>` : ''}
+                </div>
+            </div>`;
+        });
+        html += '</div>';
+        return html;
+    }
+
+    function promptAddNote(hostname) {
+        const overlay = document.createElement('div');
+        overlay.className = 'confirm-overlay';
+        overlay.innerHTML = `
+            <div class="confirm-dialog" style="max-width:480px;">
+                <div class="confirm-dialog-body" style="padding:24px 24px 8px;text-align:left;">
+                    <h4>Aggiungi Nota</h4>
+                    <p style="margin-bottom:12px;">Inserisci una nota per <strong>${hostname}</strong></p>
+                    <textarea class="note-textarea" id="noteInput" rows="3" placeholder="Scrivi qui la nota..."></textarea>
+                </div>
+                <div class="confirm-dialog-actions">
+                    <button class="btn-secondary confirm-cancel">Annulla</button>
+                    <button class="btn-primary confirm-ok">Salva Nota</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+
+        const close = () => overlay.remove();
+        const input = overlay.querySelector('#noteInput');
+        input.focus();
+
+        overlay.querySelector('.confirm-cancel').addEventListener('click', close);
+        overlay.querySelector('.confirm-ok').addEventListener('click', () => {
+            const text = input.value.trim();
+            if (!text) return;
+            DataManager.addNote(hostname, text);
+            AuditLog.log('Nota aggiunta', hostname);
+            close();
+            renderMachines(currentApp, currentEnv);
+            showToast('Nota aggiunta', 'success');
+        });
+        overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    }
+
+    function promptEditNote(hostname, noteId) {
+        const notesArr = DataManager.getNotes(hostname);
+        const note = notesArr.find(n => n.id === noteId);
+        if (!note) return;
+
+        const overlay = document.createElement('div');
+        overlay.className = 'confirm-overlay';
+        overlay.innerHTML = `
+            <div class="confirm-dialog" style="max-width:480px;">
+                <div class="confirm-dialog-body" style="padding:24px 24px 8px;text-align:left;">
+                    <h4>Modifica Nota</h4>
+                    <textarea class="note-textarea" id="noteInput" rows="3">${note.text}</textarea>
+                </div>
+                <div class="confirm-dialog-actions">
+                    <button class="btn-secondary confirm-cancel">Annulla</button>
+                    <button class="btn-primary confirm-ok">Salva</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+
+        const close = () => overlay.remove();
+        const input = overlay.querySelector('#noteInput');
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+
+        overlay.querySelector('.confirm-cancel').addEventListener('click', close);
+        overlay.querySelector('.confirm-ok').addEventListener('click', () => {
+            const text = input.value.trim();
+            if (!text) return;
+            DataManager.updateNote(hostname, noteId, text);
+            AuditLog.log('Nota modificata', hostname);
+            close();
+            renderMachines(currentApp, currentEnv);
+            showToast('Nota aggiornata', 'success');
+        });
+        overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    }
+
+    // ============================================
     // Modal
     // ============================================
     function openModal(type, hostname, entryId) {
         if (DataManager.isReadOnly()) return;
+        if (currentApp && DataManager.isAppReadOnly(currentApp)) return;
         modalTarget = { type, app: currentApp, env: currentEnv, hostname: hostname || null };
         editingEntryId = entryId || null;
 
@@ -749,7 +1091,7 @@ const App = (() => {
 
         closeModal();
         renderMachines(currentApp, currentEnv);
-        renderWelcomeStats();
+        renderHomeDashboard();
         updateChangesBadge();
     }
 
@@ -843,10 +1185,8 @@ const App = (() => {
         const container = $('#gcFilters');
         container.innerHTML = '<span class="gc-filters-label">Filtri</span>';
 
-        // Default: all deselected
         const allActive = gcActiveFilters.size === apps.length;
 
-        // Toggle all button
         const toggleAll = document.createElement('button');
         toggleAll.className = 'gc-filter-toggle-all' + (allActive ? ' all-active' : '');
         toggleAll.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${allActive ? '<polyline points="20 6 9 17 4 12"/>' : '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>'}</svg>${allActive ? 'Deseleziona' : 'Seleziona'} Tutti`;
@@ -870,7 +1210,6 @@ const App = (() => {
                 if (gcActiveFilters.has(app.name)) gcActiveFilters.delete(app.name);
                 else gcActiveFilters.add(app.name);
                 chip.classList.toggle('active');
-                // Update toggle-all state
                 const ta = container.querySelector('.gc-filter-toggle-all');
                 const nowAll = gcActiveFilters.size === apps.length;
                 ta.className = 'gc-filter-toggle-all' + (nowAll ? ' all-active' : '');
@@ -966,7 +1305,7 @@ const App = (() => {
             await DataManager.loadFromFile(file);
             AuditLog.log('Import CSV', `File: ${file.name}, ${DataManager.machines.length} server`);
             renderAppList();
-            renderWelcomeStats();
+            renderHomeDashboard();
             goHome();
             gcActiveFilters.clear();
             DynamoService.takeSnapshot(DataManager.getSchedulesRef());
@@ -990,16 +1329,49 @@ const App = (() => {
     }
 
     // ============================================
+    // Refresh / Fetch State
+    // ============================================
+    async function handleRefresh() {
+        showToast('Aggiornamento in corso...', 'info');
+        try {
+            await DataManager.loadFromPath('data/machines.csv');
+            await DataManager.loadMessages();
+            if (DynamoService.CONFIG.enabled) {
+                await DataManager.loadFromDynamo();
+            } else {
+                DynamoService.takeSnapshot(DataManager.getSchedulesRef());
+            }
+            renderAppList();
+            renderHomeDashboard();
+            if (currentView === 'machines' && currentApp && currentEnv) {
+                renderMachines(currentApp, currentEnv);
+            }
+            if (currentView === 'general-calendar') {
+                renderGCFilters();
+                renderGeneralCalendar();
+            }
+            updateChangesBadge();
+            AuditLog.log('Aggiornamento stato', 'Dati ricaricati');
+            showToast('Stato aggiornato', 'success');
+        } catch (err) {
+            showToast('Errore durante l\'aggiornamento', 'error');
+        }
+    }
+
+    // ============================================
     // Save Configuration (DynamoDB push)
     // ============================================
     function updateChangesBadge() {
         const changes = DynamoService.getModifiedAppEnvs(DataManager.getSchedulesRef());
         const badge = $('#changesBadge');
+        const saveBtn = $('#saveConfigBtn');
         if (changes.length > 0) {
             badge.textContent = changes.length;
             badge.style.display = 'flex';
+            saveBtn.classList.add('has-changes');
         } else {
             badge.style.display = 'none';
+            saveBtn.classList.remove('has-changes');
         }
     }
 
@@ -1010,16 +1382,46 @@ const App = (() => {
             return;
         }
 
-        // Build changes summary HTML
+        // Build detailed changes summary
+        const snapshot = DynamoService.getSnapshot();
         let changesHtml = '<div class="save-changes-list">';
         changes.forEach(c => {
+            let detailHtml = '';
+            // Compare each hostname
+            const allHostnames = new Set([...Object.keys(c.data), ...Object.keys(DynamoService.extractAppEnvData(snapshot, c.app, c.env))]);
+            allHostnames.forEach(hostname => {
+                const curr = c.data[hostname] || [];
+                const prev = (DynamoService.extractAppEnvData(snapshot, c.app, c.env))[hostname] || [];
+                if (JSON.stringify(curr) === JSON.stringify(prev)) return;
+
+                let changeType = '';
+                if (prev.length === 0 && curr.length > 0) changeType = '<span class="save-detail-badge added">Aggiunto</span>';
+                else if (curr.length === 0 && prev.length > 0) changeType = '<span class="save-detail-badge removed">Rimosso</span>';
+                else changeType = '<span class="save-detail-badge modified">Modificato</span>';
+
+                let entryDetail = '';
+                curr.forEach(e => {
+                    const typeLabel = e.type === 'shutdown' ? 'Shutdown' : `${e.startTime}-${e.stopTime}`;
+                    const recLabel = e.recurring && e.recurring !== 'none' ? ` (${recurringLabels[e.recurring]})` : e.dates ? ` (${e.dates.length} gg)` : '';
+                    entryDetail += `<div class="save-entry-detail">${typeLabel}${recLabel}</div>`;
+                });
+
+                detailHtml += `<div class="save-hostname-row">
+                    <span class="save-hostname-name">${hostname}</span>
+                    ${changeType}
+                    ${entryDetail}
+                </div>`;
+            });
+
             let statsHtml = '';
             if (c.added > 0) statsHtml += `<span class="save-changes-stat added">+${c.added} aggiunti</span>`;
             if (c.changed > 0) statsHtml += `<span class="save-changes-stat modified">${c.changed} modificati</span>`;
             if (c.removed > 0) statsHtml += `<span class="save-changes-stat removed">-${c.removed} rimossi</span>`;
+
             changesHtml += `<div class="save-changes-group">
                 <div class="save-changes-group-title">${c.app} / ${c.env}</div>
                 <div class="save-changes-group-detail">${statsHtml || 'Modifiche rilevate'}</div>
+                <div class="save-changes-hostnames">${detailHtml}</div>
             </div>`;
         });
         changesHtml += '</div>';
@@ -1061,7 +1463,6 @@ const App = (() => {
     // Audit Log Panel
     // ============================================
     function showAuditPanel() {
-        // Remove existing
         const existing = document.querySelector('.audit-panel-overlay');
         if (existing) { existing.remove(); document.querySelector('.audit-panel')?.remove(); return; }
 
