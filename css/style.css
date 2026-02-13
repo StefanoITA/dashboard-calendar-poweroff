@@ -944,6 +944,32 @@ body {
 }
 
 /* ============================================
+   GitHub Link Screen (OAuth)
+   ============================================ */
+.github-link-card .github-link-icon {
+    width: 80px; height: 80px;
+    border-radius: 50%;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.github-link-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 28px !important;
+    font-size: 0.95rem !important;
+    font-weight: 600;
+}
+
+.github-link-btn svg {
+    flex-shrink: 0;
+}
+
+/* ============================================
    Connection Error Overlay
    ============================================ */
 .connection-error-overlay {

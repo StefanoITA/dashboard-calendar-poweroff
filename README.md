@@ -392,39 +392,69 @@ Configura CORS sull'API Gateway per permettere le chiamate dal browser:
 - **Allowed Methods**: `POST, OPTIONS`
 - **Allowed Headers**: `Content-Type`
 
-## Autenticazione SSO (GitHub Enterprise)
+## Autenticazione SSO (GitHub Enterprise OAuth)
 
-Quando l'applicazione e ospitata su **GitHub Enterprise Pages** (es. `pages.github.azienda.com`), l'autenticazione avviene automaticamente tramite la GitHub Enterprise REST API.
+Quando l'applicazione e ospitata su **GitHub Enterprise Pages**, l'autenticazione avviene tramite il flusso **OAuth** di GitHub Enterprise, con una Lambda AWS per lo scambio sicuro del token.
 
 ### Come Funziona
 
-1. L'utente accede a GitHub Enterprise e si autentica tramite SSO (PingID, Okta, Azure AD, ecc.)
-2. All'apertura dell'app, il frontend chiama `GET /api/v3/user` sul dominio GHE con `credentials: 'include'`
-3. Il browser invia automaticamente i cookie di sessione (anche `HttpOnly`) e la API restituisce il profilo utente
-4. Il campo `login` della risposta viene confrontato con il campo `github_user` in `users.json`
-5. Se viene trovata una corrispondenza, l'utente e autenticato automaticamente con i permessi configurati
-6. Se non viene trovata, appare la schermata "Accesso non autorizzato"
-7. Come fallback, viene anche tentata la lettura del cookie `dotcom_user` (se non ha il flag `HttpOnly`)
+```
+Browser (pages.github.X.com)        GitHub Enterprise          Lambda (API Gateway)
+      |                                   |                          |
+ 1. Click "Collega GitHub"               |                          |
+      |--- redirect /login/oauth/auth -->|                          |
+      |                                   | (SSO session check)     |
+      |<--- redirect ?code=abc123 -------|                          |
+      |                                                              |
+ 2. POST { code } ------------------------------------------------>|
+      |                                   |<-- POST /access_token --|
+      |                                   |-- token:xxx ----------->|
+      |                                   |<-- GET /api/v3/user ----|
+      |                                   |-- { login } ----------->|
+      |<--- { login: "username" } ---------------------------------|
+      |
+ 3. Match login vs users.json → auto-login
+      | (salva in localStorage per visite successive)
+```
 
-### Configurazione SSO
+### Setup Passo-Passo
 
-In `js/app.js`, modifica `SSO_CONFIG` con il dominio del tuo GitHub Enterprise:
+#### A. Creare OAuth App su GitHub Enterprise
+
+1. Accedere a `github.AZIENDA.com` → **Settings** → **Developer settings** → **OAuth Apps** → **New OAuth App**
+2. Compilare:
+   - **Application name**: `Shutdown Scheduler`
+   - **Homepage URL**: `https://pages.github.AZIENDA.com/PATH/`
+   - **Authorization callback URL**: `https://pages.github.AZIENDA.com/PATH/` (stessa URL)
+3. Cliccare **Register application**
+4. Copiare il **Client ID**
+5. Generare e copiare il **Client Secret**
+
+#### B. Deployare la Lambda
+
+1. Creare una nuova Lambda AWS con il codice in `lambda/oauth-github.js`
+2. Impostare le **variabili d'ambiente**:
+   - `GHE_BASE_URL` = `https://github.AZIENDA.com` (dominio GHE reale)
+   - `OAUTH_CLIENT_ID` = Client ID dal passo A
+   - `OAUTH_CLIENT_SECRET` = Client Secret dal passo A
+   - `ALLOWED_ORIGIN` = `https://pages.github.AZIENDA.com` (dominio Pages reale)
+3. La Lambda deve poter raggiungere `github.AZIENDA.com` dalla rete interna
+4. La Lambda risponde alla root (non serve path aggiuntivo)
+5. Abilitare CORS sulla Lambda
+
+#### C. Configurare il Frontend
+
+In `js/app.js`, riga ~55, sostituire i placeholder in `SSO_CONFIG`:
 
 ```javascript
 const SSO_CONFIG = {
     enabled: true,
-    gheBaseUrl: 'https://github.AZIENDA.com'  // <-- Sostituire con il dominio reale
+    gheBaseUrl: 'https://github.AZIENDA.com',                          // Dominio GHE reale
+    oauthClientId: 'YOUR_OAUTH_CLIENT_ID',                             // Client ID
+    oauthCallbackUrl: 'https://pages.github.AZIENDA.com/PATH/',        // URL del sito
+    oauthExchangeUrl: 'https://YOUR_LAMBDA_URL'  // URL della Lambda (root, senza path)
 };
 ```
-
-- **`enabled`**: `true` per ambienti con SSO, `false` per sviluppo locale
-- **`gheBaseUrl`**: Il dominio base di GitHub Enterprise (es. `https://github.tuaazienda.com`)
-
-### Requisiti
-
-- L'utente deve essere autenticato su GitHub Enterprise nello stesso browser
-- Il dominio Pages deve poter comunicare con il dominio GHE (CORS)
-- Ogni utente deve avere il campo `github_user` nel file `users.json`
 
 ### Configurare un Nuovo Utente
 
@@ -447,15 +477,17 @@ Il campo `github_user` deve corrispondere esattamente allo username GitHub Enter
 
 ### Sviluppo Locale
 
-Per sviluppo locale, impostare `SSO_CONFIG.enabled = false` in `js/app.js`. Questo disabilita la verifica SSO e mostra un selettore dropdown per scegliere manualmente l'utente, facilitando il testing dei diversi ruoli.
+Per sviluppo locale, impostare `SSO_CONFIG.enabled = false` in `js/app.js`. Questo disabilita OAuth e mostra un selettore dropdown per scegliere manualmente l'utente.
 
 ### Troubleshooting
 
 | Problema | Soluzione |
 |----------|-----------|
-| "Autenticazione SSO non riuscita" | Verificare di essere loggati su GitHub Enterprise e che `gheBaseUrl` sia corretto |
-| Errore CORS nella console | Il dominio Pages deve essere autorizzato dal CORS di GitHub Enterprise |
-| Utente non riconosciuto | Aggiungere il `github_user` corretto in `users.json` |
+| Bottone "Collega GitHub" non fa nulla | Verificare `oauthClientId` e `gheBaseUrl` in `SSO_CONFIG` |
+| Errore dopo redirect da GHE | Verificare che `oauthCallbackUrl` corrisponda esattamente alla callback URL dell'OAuth App |
+| "Token exchange failed" nella console | Verificare che la Lambda possa raggiungere GHE e che `OAUTH_CLIENT_SECRET` sia corretto |
+| Utente non riconosciuto dopo login | Aggiungere il `github_user` corretto in `users.json` |
+| Per discollegare l'account | Cancellare `shutdownScheduler_gheLogin` da localStorage (DevTools → Application → Local Storage) |
 
 ## Deployment
 
