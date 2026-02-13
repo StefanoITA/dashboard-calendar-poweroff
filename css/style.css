@@ -324,6 +324,31 @@ body {
 
 .user-select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-subtle); }
 
+/* SSO User Display */
+.sso-user-display {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 12px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    font-size: 0.84rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.sso-user-display svg {
+    color: var(--accent);
+    flex-shrink: 0;
+}
+
+.sso-user-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .user-role-badge-container {
     display: flex;
     justify-content: center;

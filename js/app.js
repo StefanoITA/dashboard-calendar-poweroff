@@ -16,6 +16,7 @@ const App = (() => {
     let gcActiveEnvFilters = new Set();
     let gcEnvFiltersInitialized = false;
     let isUnauthorized = false;
+    let ssoAuthenticated = false;
     let unsavedReminderTimer = null;
     let unsavedPopupShown = false;
 
@@ -47,6 +48,14 @@ const App = (() => {
         edit: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
         lock: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
     };
+
+    // ============================================
+    // Cookie Reader (SSO via GitHub Enterprise)
+    // ============================================
+    function getCookie(name) {
+        const match = document.cookie.match(new RegExp('(?:^|;\\s*)' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
+        return match ? decodeURIComponent(match[1]) : null;
+    }
 
     // ============================================
     // Confirm Dialog (Promise-based)
@@ -228,19 +237,35 @@ const App = (() => {
         await DataManager.loadMessages();
         await DataManager.loadFromPath('data/machines.csv');
 
-        // Check if saved user exists
         const users = DataManager.getUsers();
-        const savedUserId = localStorage.getItem('shutdownScheduler_userId');
-        const matchedUser = users.find(u => u.id === savedUserId);
 
-        if (savedUserId && !matchedUser) {
-            // Saved user not in users.json → unauthorized
-            showUnauthorizedScreen(savedUserId);
-            return;
+        // SSO: try to authenticate via GitHub Enterprise cookie
+        const gheCookie = getCookie('dotcom_user');
+        if (gheCookie) {
+            const ssoUser = DataManager.findUserByGitHub(gheCookie);
+            if (ssoUser) {
+                // Authenticated via SSO — auto-login
+                ssoAuthenticated = true;
+                DataManager.setCurrentUser(ssoUser.id);
+                localStorage.setItem('shutdownScheduler_userId', ssoUser.id);
+            } else {
+                // Cookie present but user not in users.json → unauthorized
+                showUnauthorizedScreen(gheCookie);
+                return;
+            }
+        } else {
+            // No SSO cookie → fallback to manual user selector (local dev)
+            const savedUserId = localStorage.getItem('shutdownScheduler_userId');
+            const matchedUser = users.find(u => u.id === savedUserId);
+
+            if (savedUserId && !matchedUser) {
+                showUnauthorizedScreen(savedUserId);
+                return;
+            }
+
+            const defaultUser = matchedUser || users[0];
+            if (defaultUser) DataManager.setCurrentUser(defaultUser.id);
         }
-
-        const defaultUser = matchedUser || users[0];
-        if (defaultUser) DataManager.setCurrentUser(defaultUser.id);
 
         renderUserSelector();
         applyRoleMode();
@@ -270,6 +295,7 @@ const App = (() => {
     // ============================================
     function showUnauthorizedScreen(userId) {
         isUnauthorized = true;
+        const isSso = !!getCookie('dotcom_user');
         const overlay = document.createElement('div');
         overlay.className = 'unauthorized-overlay';
         overlay.innerHTML = `
@@ -278,10 +304,16 @@ const App = (() => {
                     ${SVG.lock}
                 </div>
                 <h2>Accesso non autorizzato</h2>
-                <p>L'utenza <strong>${userId || 'sconosciuta'}</strong> non \u00e8 abilitata all'utilizzo di questa applicazione.</p>
-                <p class="unauthorized-sub">Contattare un amministratore per richiedere l'accesso al sistema.</p>
+                <p>${isSso
+                    ? `L'utenza GitHub Enterprise <strong>${userId}</strong> non \u00e8 associata a nessun profilo in questa applicazione.`
+                    : `L'utenza <strong>${userId || 'sconosciuta'}</strong> non \u00e8 abilitata all'utilizzo di questa applicazione.`
+                }</p>
+                <p class="unauthorized-sub">${isSso
+                    ? 'Richiedere a un amministratore di aggiungere il proprio <code>github_user</code> nel file <code>users.json</code>.'
+                    : 'Contattare un amministratore per richiedere l\'accesso al sistema.'
+                }</p>
                 <div class="unauthorized-actions">
-                    <button class="btn-primary" onclick="localStorage.removeItem('shutdownScheduler_userId');location.reload();">Cambia Utente</button>
+                    ${isSso ? '' : '<button class="btn-primary" onclick="localStorage.removeItem(\'shutdownScheduler_userId\');location.reload();">Cambia Utente</button>'}
                 </div>
                 <div class="unauthorized-contact">
                     <span>Amministratore: mario.rossi@company.it</span>
@@ -390,35 +422,53 @@ const App = (() => {
             'Read-Only': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'
         };
 
-        let optionsHtml = users.map(u => `<option value="${u.id}" ${current && current.id === u.id ? 'selected' : ''}>${u.name}</option>`).join('');
         const roleCls = current ? roleMap[current.role] || '' : '';
         const roleLabel = current ? roleLabels[current.role] || current.role : '';
         const roleIcon = current ? roleIcons[current.role] || '' : '';
 
-        panel.innerHTML = `
-            <div class="sidebar-label">Utente Attivo</div>
-            <select class="user-select" id="userSelect">${optionsHtml}</select>
-            <div class="user-role-badge-container">
-                <div class="user-role-badge ${roleCls}" id="userRoleBadge">
-                    ${roleIcon}
-                    <span>${roleLabel}</span>
+        if (ssoAuthenticated) {
+            // SSO mode: show fixed user identity, no dropdown
+            panel.innerHTML = `
+                <div class="sidebar-label">Autenticato via SSO</div>
+                <div class="sso-user-display">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    <span class="sso-user-name">${current ? current.name : 'Sconosciuto'}</span>
                 </div>
-            </div>`;
+                <div class="user-role-badge-container">
+                    <div class="user-role-badge ${roleCls}" id="userRoleBadge">
+                        ${roleIcon}
+                        <span>${roleLabel}</span>
+                    </div>
+                </div>`;
+        } else {
+            // Local dev mode: show dropdown selector
+            let optionsHtml = users.map(u => `<option value="${u.id}" ${current && current.id === u.id ? 'selected' : ''}>${u.name}</option>`).join('');
 
-        $('#userSelect').addEventListener('change', e => {
-            const user = DataManager.setCurrentUser(e.target.value);
-            localStorage.setItem('shutdownScheduler_userId', e.target.value);
-            AuditLog.log('Cambio utente', `Selezionato: ${user.name} (${user.role})`);
-            applyRoleMode();
-            renderAppList();
-            renderVMListButton();
-            renderHomeDashboard();
-            goHome();
-            gcActiveFilters.clear();
-            gcActiveEnvFilters.clear();
-            renderUserSelector();
-            updateChangesBadge();
-        });
+            panel.innerHTML = `
+                <div class="sidebar-label">Utente Attivo</div>
+                <select class="user-select" id="userSelect">${optionsHtml}</select>
+                <div class="user-role-badge-container">
+                    <div class="user-role-badge ${roleCls}" id="userRoleBadge">
+                        ${roleIcon}
+                        <span>${roleLabel}</span>
+                    </div>
+                </div>`;
+
+            $('#userSelect').addEventListener('change', e => {
+                const user = DataManager.setCurrentUser(e.target.value);
+                localStorage.setItem('shutdownScheduler_userId', e.target.value);
+                AuditLog.log('Cambio utente', `Selezionato: ${user.name} (${user.role})`);
+                applyRoleMode();
+                renderAppList();
+                renderVMListButton();
+                renderHomeDashboard();
+                goHome();
+                gcActiveFilters.clear();
+                gcActiveEnvFilters.clear();
+                renderUserSelector();
+                updateChangesBadge();
+            });
+        }
     }
 
     function applyRoleMode() {
