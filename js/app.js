@@ -46,12 +46,12 @@ const App = (() => {
     // ============================================
     // Confirm Dialog (Promise-based)
     // ============================================
-    function confirmDialog({ title, message, confirmLabel = 'Elimina', iconType = 'danger', confirmClass = 'btn-danger' }) {
+    function confirmDialog({ title, message, confirmLabel = 'Elimina', iconType = 'danger', confirmClass = 'btn-danger', wide = false }) {
         return new Promise(resolve => {
             const overlay = document.createElement('div');
             overlay.className = 'confirm-overlay';
             overlay.innerHTML = `
-                <div class="confirm-dialog">
+                <div class="confirm-dialog${wide ? ' confirm-dialog-wide' : ''}">
                     <div class="confirm-dialog-icon">
                         <div class="icon-circle ${iconType}">${SVG.alert}</div>
                     </div>
@@ -191,8 +191,8 @@ const App = (() => {
     function scrollToActive(picker) {
         const activeHour = picker.querySelector('.tp-hours .tp-scroll-item.active');
         const activeMin = picker.querySelector('.tp-minutes .tp-scroll-item.active');
-        if (activeHour) activeHour.scrollIntoView({ block: 'center', behavior: 'smooth' });
-        if (activeMin) activeMin.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        if (activeHour) activeHour.scrollIntoView({ block: 'center', behavior: 'instant' });
+        if (activeMin) activeMin.scrollIntoView({ block: 'center', behavior: 'instant' });
     }
 
     function updateTimePickerDisplay(picker) {
@@ -253,6 +253,7 @@ const App = (() => {
         }
 
         renderAppList();
+        renderVMListButton();
         renderHomeDashboard();
         initTimePickers();
         bindEvents();
@@ -379,6 +380,7 @@ const App = (() => {
             AuditLog.log('Cambio utente', `Selezionato: ${user.name} (${user.role})`);
             applyRoleMode();
             renderAppList();
+            renderVMListButton();
             renderHomeDashboard();
             goHome();
             gcActiveFilters.clear();
@@ -423,7 +425,14 @@ const App = (() => {
         $('#welcomeScreen').style.display = view === 'home' ? 'block' : 'none';
         $('#machinesView').style.display = view === 'machines' ? 'block' : 'none';
         $('#generalCalendarView').style.display = view === 'general-calendar' ? 'block' : 'none';
+        const vmView = document.getElementById('vmListView');
+        if (vmView) vmView.style.display = view === 'vm-list' ? 'block' : 'none';
         $('#exportBtn').style.display = (view === 'machines' || view === 'general-calendar') ? 'inline-flex' : 'none';
+        // Update sidebar active states
+        $('#homeBtn').classList.toggle('active', view === 'home');
+        $('#generalCalendarBtn').classList.toggle('active', view === 'general-calendar');
+        const vmBtn = document.getElementById('vmListBtn');
+        if (vmBtn) vmBtn.classList.toggle('active', view === 'vm-list');
     }
 
     function updateCalendarVisibility() {
@@ -495,6 +504,20 @@ const App = (() => {
         });
     }
 
+    function renderVMListButton() {
+        // Remove old button if present
+        const old = document.getElementById('vmListBtn');
+        if (old) old.remove();
+        if (!DataManager.canViewVMList()) return;
+        const navActions = document.querySelector('.sidebar-nav-actions');
+        const btn = document.createElement('button');
+        btn.className = 'sidebar-action-btn';
+        btn.id = 'vmListBtn';
+        btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg> Elenco VM`;
+        btn.addEventListener('click', showVMList);
+        navActions.appendChild(btn);
+    }
+
     function selectApp(appName, itemEl) {
         currentApp = appName;
         currentEnv = null;
@@ -538,6 +561,7 @@ const App = (() => {
 
     function selectEnv(envName) {
         currentEnv = envName;
+        closeEnvPopover();
         updateBreadcrumb(currentApp, envName);
         renderMachines(currentApp, envName);
         showView('machines');
@@ -754,6 +778,62 @@ const App = (() => {
         const origBtn = $('#applyAllBtn');
         if (origBtn) origBtn.style.display = 'none';
 
+        // Env Groups Section
+        const envGroups = DataManager.getEnvGroups(appName, envName);
+        let envGroupsContainer = document.querySelector('.env-groups-section');
+        if (envGroupsContainer) envGroupsContainer.remove();
+        if (envGroups.length > 0) {
+            envGroupsContainer = document.createElement('div');
+            envGroupsContainer.className = 'env-groups-section';
+            envGroupsContainer.innerHTML = `<div class="env-groups-title">Schedulazioni Ambiente</div>` +
+                envGroups.map(g => {
+                    const e = g.entry;
+                    const typeLabel = e.type === 'shutdown' ? 'Shutdown Completo' : `${e.startTime} \u2014 ${e.stopTime}`;
+                    const recLabel = e.recurring && e.recurring !== 'none' ? recurringLabels[e.recurring] : e.dates && e.dates.length > 0 ? `${e.dates.length} giorni specifici` : '';
+                    const excluded = g.totalMachines - g.hostnames.length;
+                    return `<div class="env-group-card" data-group-id="${g.groupId}">
+                        <div class="env-group-info">
+                            <div class="env-group-type">${typeLabel}</div>
+                            <div class="env-group-detail">${recLabel} &middot; ${g.hostnames.length}/${g.totalMachines} server${excluded > 0 ? ` (${excluded} esclusi)` : ''}</div>
+                        </div>
+                        ${!readOnly ? `<div class="env-group-actions">
+                            <button class="btn-secondary env-group-edit-btn" data-group-id="${g.groupId}" style="padding:6px 12px;font-size:0.78rem;">${SVG.edit} Modifica</button>
+                            <button class="btn-entry-action delete-entry-btn env-group-delete-btn" data-group-id="${g.groupId}" title="Elimina schedulazione ambiente">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                            </button>
+                        </div>` : ''}
+                    </div>`;
+                }).join('');
+            grid.parentNode.insertBefore(envGroupsContainer, grid);
+
+            // Env group event handlers
+            envGroupsContainer.querySelectorAll('.env-group-edit-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const gid = btn.dataset.groupId;
+                    const group = envGroups.find(g => g.groupId === gid);
+                    if (!group) return;
+                    openModal('environment-edit', null, null, group);
+                });
+            });
+            envGroupsContainer.querySelectorAll('.env-group-delete-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const confirmed = await confirmDialog({
+                        title: 'Eliminare schedulazione ambiente?',
+                        message: 'Questa azione rimuover\u00e0 la schedulazione da tutti i server dell\'ambiente.',
+                        confirmLabel: 'Elimina',
+                        iconType: 'danger'
+                    });
+                    if (!confirmed) return;
+                    DataManager.removeEnvGroup(appName, envName, btn.dataset.groupId);
+                    AuditLog.log('Eliminazione schedulazione ambiente', `${appName} / ${envName}`);
+                    renderMachines(currentApp, currentEnv);
+                    renderHomeDashboard();
+                    updateChangesBadge();
+                    showToast('Schedulazione ambiente rimossa', 'info');
+                });
+            });
+        }
+
         machines.forEach(m => {
             const entries = DataManager.getScheduleEntries(appName, envName, m.hostname);
             const notesArr = DataManager.getNotes(m.hostname);
@@ -814,6 +894,22 @@ const App = (() => {
             }
 
             card.querySelectorAll('.edit-entry-btn').forEach(btn => btn.addEventListener('click', () => openModal('machine', m.hostname, btn.dataset.entryId)));
+
+            card.querySelectorAll('.exclude-env-btn').forEach(btn => btn.addEventListener('click', async () => {
+                const confirmed = await confirmDialog({
+                    title: 'Escludi da schedulazione ambiente?',
+                    message: `Vuoi escludere <strong>${m.machine_name}</strong> dalla schedulazione ambiente? Gli altri server non saranno modificati.`,
+                    confirmLabel: 'Escludi',
+                    iconType: 'warning',
+                    confirmClass: 'btn-primary'
+                });
+                if (!confirmed) return;
+                DataManager.excludeFromEnvGroup(appName, envName, m.hostname, btn.dataset.groupId);
+                AuditLog.log('Server escluso da schedulazione ambiente', `${m.hostname} (${appName} / ${envName})`);
+                renderMachines(currentApp, currentEnv);
+                updateChangesBadge();
+                showToast(`${m.machine_name} escluso dalla schedulazione ambiente`, 'info');
+            }));
 
             card.querySelectorAll('.delete-entry-btn').forEach(btn => btn.addEventListener('click', async () => {
                 const confirmed = await confirmDialog({
@@ -878,8 +974,11 @@ const App = (() => {
                 else detailHtml = `<div class="schedule-dates-detail"><ul>${parts.map(p => `<li>${p}</li>`).join('')}</ul></div>`;
             }
 
+            const envTag = entry.envGroupId ? '<span class="entry-env-tag">Ambiente</span>' : '';
+            const excludeBtn = (!readOnly && entry.envGroupId) ? `<button class="btn-entry-action exclude-env-btn" data-group-id="${entry.envGroupId}" data-hostname="${hostname}" title="Escludi da schedulazione ambiente"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg></button>` : '';
             const actionsHtml = readOnly ? '' : `
                 <div class="schedule-entry-actions">
+                    ${excludeBtn}
                     <button class="btn-entry-action edit-entry-btn" data-entry-id="${entry.id}" title="Modifica">${SVG.edit}</button>
                     <button class="btn-entry-action delete-entry-btn" data-entry-id="${entry.id}" title="Elimina">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
@@ -892,6 +991,7 @@ const App = (() => {
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                         ${typeLabel}
                     </div>
+                    ${envTag}
                     ${detailHtml}
                 </div>
                 ${actionsHtml}
@@ -905,7 +1005,7 @@ const App = (() => {
     function renderNotesSection(hostname, notesArr, readOnly) {
         if (notesArr.length === 0) return '';
         let html = '<div class="notes-section">';
-        html += `<div class="notes-header">${SVG.note} <span>Note (${notesArr.length})</span></div>`;
+        html += `<div class="notes-header">${SVG.note} <span>Note (${notesArr.length})</span><span class="notes-private-hint">privata &middot; solo locale</span></div>`;
         notesArr.forEach(n => {
             const date = new Date(n.timestamp);
             const timeStr = `${String(date.getDate()).padStart(2,'0')}/${String(date.getMonth()+1).padStart(2,'0')} ${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
@@ -933,7 +1033,8 @@ const App = (() => {
             <div class="confirm-dialog" style="max-width:480px;">
                 <div class="confirm-dialog-body" style="padding:24px 24px 8px;text-align:left;">
                     <h4>Aggiungi Nota</h4>
-                    <p style="margin-bottom:12px;">Inserisci una nota per <strong>${hostname}</strong></p>
+                    <p style="margin-bottom:8px;">Inserisci una nota per <strong>${hostname}</strong></p>
+                    <p style="font-size:0.74rem;color:var(--text-tertiary);margin-bottom:12px;">Le note sono private e salvate solo localmente nel tuo browser.</p>
                     <textarea class="note-textarea" id="noteInput" rows="3" placeholder="Scrivi qui la nota..."></textarea>
                 </div>
                 <div class="confirm-dialog-actions">
@@ -1001,7 +1102,7 @@ const App = (() => {
     // ============================================
     // Modal
     // ============================================
-    function openModal(type, hostname, entryId) {
+    function openModal(type, hostname, entryId, envGroup) {
         if (DataManager.isReadOnly()) return;
         if (currentApp && DataManager.isAppReadOnly(currentApp)) return;
         modalTarget = { type, app: currentApp, env: currentEnv, hostname: hostname || null };
@@ -1017,6 +1118,12 @@ const App = (() => {
             } else {
                 loadEntryIntoModal(null);
             }
+        } else if (type === 'environment-edit' && envGroup) {
+            modalTarget.type = 'environment-edit';
+            modalTarget.envGroupId = envGroup.groupId;
+            $('#modalTitle').textContent = 'Modifica Schedulazione Ambiente';
+            $('#modalTarget').innerHTML = `<strong>${currentApp}</strong> \u2014 ${currentEnv} (${envGroup.hostnames.length}/${envGroup.totalMachines} server inclusi)`;
+            loadEntryIntoModal(envGroup.entry);
         } else {
             $('#modalTitle').textContent = 'Pianifica Intero Ambiente';
             $('#modalTarget').innerHTML = `<strong>${currentApp}</strong> \u2014 ${currentEnv} (tutti i server)`;
@@ -1083,6 +1190,10 @@ const App = (() => {
                 AuditLog.log('Aggiunta entry', `${modalTarget.app} / ${modalTarget.env} / ${modalTarget.hostname}`);
                 showToast('Pianificazione aggiunta', 'success');
             }
+        } else if (modalTarget.type === 'environment-edit' && modalTarget.envGroupId) {
+            DataManager.updateEnvGroup(modalTarget.app, modalTarget.env, modalTarget.envGroupId, entry);
+            AuditLog.log('Modifica schedulazione ambiente', `${modalTarget.app} / ${modalTarget.env}`);
+            showToast('Schedulazione ambiente aggiornata', 'success');
         } else {
             DataManager.addEntryForEnv(modalTarget.app, modalTarget.env, entry);
             AuditLog.log('Pianificazione ambiente', `${modalTarget.app} / ${modalTarget.env} (tutti i server)`);
@@ -1296,6 +1407,110 @@ const App = (() => {
     }
 
     // ============================================
+    // VM List View
+    // ============================================
+    function showVMList() {
+        currentApp = null;
+        currentEnv = null;
+        $$('#appList .nav-item').forEach(i => i.classList.remove('active'));
+        $$('.sidebar-action-btn').forEach(b => b.classList.remove('active'));
+        const vmBtn = document.getElementById('vmListBtn');
+        if (vmBtn) vmBtn.classList.add('active');
+        closeEnvPopover();
+        updateBreadcrumb(null);
+        renderVMList();
+        showView('vm-list');
+    }
+
+    function renderVMList() {
+        const vmView = document.getElementById('vmListView');
+        if (!vmView) return;
+        const allMachines = DataManager.getVMListMachines();
+        const apps = [...new Set(allMachines.map(m => m.application))].sort();
+        const envs = [...new Set(allMachines.map(m => m.environment))].sort();
+
+        vmView.innerHTML = `
+            <div class="vm-list-header">
+                <div class="vm-list-title-row">
+                    <div>
+                        <h2>Elenco VM</h2>
+                        <div class="vm-list-subtitle">${allMachines.length} server totali</div>
+                    </div>
+                </div>
+            </div>
+            <div class="vm-list-filters">
+                <div class="vm-filter-group">
+                    <label class="vm-filter-label">Applicazione</label>
+                    <select class="vm-filter-select" id="vmFilterApp">
+                        <option value="">Tutte</option>
+                        ${apps.map(a => `<option value="${a}">${a}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="vm-filter-group">
+                    <label class="vm-filter-label">Ambiente</label>
+                    <select class="vm-filter-select" id="vmFilterEnv">
+                        <option value="">Tutti</option>
+                        ${envs.map(e => `<option value="${e}">${e}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="vm-filter-group" style="flex:1;min-width:200px;">
+                    <label class="vm-filter-label">Cerca</label>
+                    <input type="text" class="vm-filter-search" id="vmFilterSearch" placeholder="Cerca per nome, hostname...">
+                </div>
+                <div class="vm-filter-group" style="align-self:flex-end;">
+                    <span class="vm-filter-count" id="vmFilterCount">${allMachines.length} risultati</span>
+                </div>
+            </div>
+            <div class="vm-list-table-wrapper">
+                <table class="vm-list-table">
+                    <thead>
+                        <tr>
+                            <th>Nome Server</th>
+                            <th>Hostname</th>
+                            <th>Tipo</th>
+                            <th>Applicazione</th>
+                            <th>Ambiente</th>
+                        </tr>
+                    </thead>
+                    <tbody id="vmListBody"></tbody>
+                </table>
+            </div>`;
+
+        const renderRows = () => {
+            const filterApp = vmView.querySelector('#vmFilterApp').value;
+            const filterEnv = vmView.querySelector('#vmFilterEnv').value;
+            const filterSearch = vmView.querySelector('#vmFilterSearch').value.toLowerCase();
+            const tbody = vmView.querySelector('#vmListBody');
+
+            const filtered = allMachines.filter(m => {
+                if (filterApp && m.application !== filterApp) return false;
+                if (filterEnv && m.environment !== filterEnv) return false;
+                if (filterSearch && !`${m.machine_name} ${m.hostname} ${m.server_type} ${m.application} ${m.environment}`.toLowerCase().includes(filterSearch)) return false;
+                return true;
+            });
+
+            vmView.querySelector('#vmFilterCount').textContent = filtered.length + ' risultati';
+
+            const typeColors = { 'Web Server': 'var(--info)', 'Application Server': 'var(--accent)', 'Database Server': 'var(--danger)' };
+            tbody.innerHTML = filtered.map(m => {
+                const tc = typeColors[m.server_type] || 'var(--text-tertiary)';
+                return `<tr>
+                    <td class="vm-cell-name">${m.machine_name}</td>
+                    <td class="vm-cell-hostname"><code>${m.hostname}</code></td>
+                    <td><span class="vm-type-badge" style="color:${tc};background:${tc}12;border-color:${tc}30">${m.server_type.replace(' Server', '')}</span></td>
+                    <td>${m.application}</td>
+                    <td><span class="vm-env-badge">${m.environment}</span></td>
+                </tr>`;
+            }).join('');
+        };
+
+        renderRows();
+        vmView.querySelector('#vmFilterApp').addEventListener('change', renderRows);
+        vmView.querySelector('#vmFilterEnv').addEventListener('change', renderRows);
+        vmView.querySelector('#vmFilterSearch').addEventListener('input', renderRows);
+    }
+
+    // ============================================
     // CSV Import / Export
     // ============================================
     async function handleCSVImport(e) {
@@ -1342,6 +1557,7 @@ const App = (() => {
                 DynamoService.takeSnapshot(DataManager.getSchedulesRef());
             }
             renderAppList();
+            renderVMListButton();
             renderHomeDashboard();
             if (currentView === 'machines' && currentApp && currentEnv) {
                 renderMachines(currentApp, currentEnv);
@@ -1349,6 +1565,9 @@ const App = (() => {
             if (currentView === 'general-calendar') {
                 renderGCFilters();
                 renderGeneralCalendar();
+            }
+            if (currentView === 'vm-list') {
+                renderVMList();
             }
             updateChangesBadge();
             AuditLog.log('Aggiornamento stato', 'Dati ricaricati');
@@ -1431,13 +1650,24 @@ const App = (() => {
             message: `Vuoi salvare le modifiche per <strong>${changes.length}</strong> ambienti?${changesHtml}`,
             confirmLabel: 'Salva Modifiche',
             iconType: 'accent',
-            confirmClass: 'btn-primary'
+            confirmClass: 'btn-primary',
+            wide: true
         });
         if (!confirmed) return;
 
         if (DynamoService.CONFIG.enabled) {
             const user = DataManager.getCurrentUser();
-            const pushData = changes.map(c => ({ key: c.key, data: c.data }));
+            // Enrich each hostname's entries with cronjob translation (per server)
+            const pushData = changes.map(c => {
+                const enriched = {};
+                for (const [hostname, entries] of Object.entries(c.data)) {
+                    enriched[hostname] = entries.map(e => ({
+                        ...e,
+                        cronjobs: DataManager.generateCronjobs([e])[0]?.crons || []
+                    }));
+                }
+                return { key: c.key, data: enriched };
+            });
             try {
                 const results = await DynamoService.saveMultiple(pushData, user ? user.id : 'unknown');
                 const failed = results.filter(r => !r.success);
