@@ -1,0 +1,59 @@
+application,environment,machine_name,hostname,server_type,ip_address
+Portale Clienti,Development,Web Server 1,web-dev-01.internal,Web Server,10.0.1.10
+Portale Clienti,Development,App Server 1,app-dev-01.internal,Application Server,10.0.1.11
+Portale Clienti,Development,DB Server 1,db-dev-01.internal,Database Server,10.0.1.12
+Portale Clienti,Integration,Web Server 1,web-int-01.internal,Web Server,10.0.2.10
+Portale Clienti,Integration,App Server 1,app-int-01.internal,Application Server,10.0.2.11
+Portale Clienti,Integration,App Server 2,app-int-02.internal,Application Server,10.0.2.12
+Portale Clienti,Integration,DB Server 1,db-int-01.internal,Database Server,10.0.2.13
+Portale Clienti,Pre-Produzione,Web Server 1,web-preprod-01.internal,Web Server,10.0.3.10
+Portale Clienti,Pre-Produzione,App Server 1,app-preprod-01.internal,Application Server,10.0.3.11
+Portale Clienti,Pre-Produzione,DB Server 1,db-preprod-01.internal,Database Server,10.0.3.12
+Portale Clienti,Produzione,Web Server 1,web-prod-01.internal,Web Server,10.0.4.10
+Portale Clienti,Produzione,Web Server 2,web-prod-02.internal,Web Server,10.0.4.11
+Portale Clienti,Produzione,App Server 1,app-prod-01.internal,Application Server,10.0.4.12
+Portale Clienti,Produzione,App Server 2,app-prod-02.internal,Application Server,10.0.4.13
+Portale Clienti,Produzione,DB Server 1,db-prod-01.internal,Database Server,10.0.4.14
+Portale Clienti,Produzione,DB Server 2,db-prod-02.internal,Database Server,10.0.4.15
+CRM Aziendale,Development,Web Server 1,crm-web-dev-01.internal,Web Server,10.1.1.10
+CRM Aziendale,Development,App Server 1,crm-app-dev-01.internal,Application Server,10.1.1.11
+CRM Aziendale,Development,DB Server 1,crm-db-dev-01.internal,Database Server,10.1.1.12
+CRM Aziendale,Integration,Web Server 1,crm-web-int-01.internal,Web Server,10.1.2.10
+CRM Aziendale,Integration,App Server 1,crm-app-int-01.internal,Application Server,10.1.2.11
+CRM Aziendale,Integration,DB Server 1,crm-db-int-01.internal,Database Server,10.1.2.12
+CRM Aziendale,Training,Web Server 1,crm-web-train-01.internal,Web Server,10.1.5.10
+CRM Aziendale,Training,App Server 1,crm-app-train-01.internal,Application Server,10.1.5.11
+CRM Aziendale,Training,DB Server 1,crm-db-train-01.internal,Database Server,10.1.5.12
+CRM Aziendale,Produzione,Web Server 1,crm-web-prod-01.internal,Web Server,10.1.4.10
+CRM Aziendale,Produzione,App Server 1,crm-app-prod-01.internal,Application Server,10.1.4.11
+CRM Aziendale,Produzione,DB Server 1,crm-db-prod-01.internal,Database Server,10.1.4.12
+ERP Finance,Development,App Server 1,erp-app-dev-01.internal,Application Server,10.2.1.10
+ERP Finance,Development,DB Server 1,erp-db-dev-01.internal,Database Server,10.2.1.11
+ERP Finance,Bugfixing,App Server 1,erp-app-bug-01.internal,Application Server,10.2.6.10
+ERP Finance,Bugfixing,DB Server 1,erp-db-bug-01.internal,Database Server,10.2.6.11
+ERP Finance,Pre-Produzione,App Server 1,erp-app-preprod-01.internal,Application Server,10.2.3.10
+ERP Finance,Pre-Produzione,App Server 2,erp-app-preprod-02.internal,Application Server,10.2.3.11
+ERP Finance,Pre-Produzione,DB Server 1,erp-db-preprod-01.internal,Database Server,10.2.3.12
+ERP Finance,Produzione,App Server 1,erp-app-prod-01.internal,Application Server,10.2.4.10
+ERP Finance,Produzione,App Server 2,erp-app-prod-02.internal,Application Server,10.2.4.11
+ERP Finance,Produzione,DB Server 1,erp-db-prod-01.internal,Database Server,10.2.4.12
+ERP Finance,Produzione,DB Server 2,erp-db-prod-02.internal,Database Server,10.2.4.13
+Data Analytics Platform,Development,Web Server 1,dap-web-dev-01.internal,Web Server,10.3.1.10
+Data Analytics Platform,Development,App Server 1,dap-app-dev-01.internal,Application Server,10.3.1.11
+Data Analytics Platform,Development,DB Server 1,dap-db-dev-01.internal,Database Server,10.3.1.12
+Data Analytics Platform,Integration,Web Server 1,dap-web-int-01.internal,Web Server,10.3.2.10
+Data Analytics Platform,Integration,App Server 1,dap-app-int-01.internal,Application Server,10.3.2.11
+Data Analytics Platform,Integration,DB Server 1,dap-db-int-01.internal,Database Server,10.3.2.12
+Data Analytics Platform,Produzione,Web Server 1,dap-web-prod-01.internal,Web Server,10.3.4.10
+Data Analytics Platform,Produzione,Web Server 2,dap-web-prod-02.internal,Web Server,10.3.4.11
+Data Analytics Platform,Produzione,App Server 1,dap-app-prod-01.internal,Application Server,10.3.4.12
+Data Analytics Platform,Produzione,DB Server 1,dap-db-prod-01.internal,Database Server,10.3.4.13
+Gestionale HR,Development,Web Server 1,hr-web-dev-01.internal,Web Server,10.4.1.10
+Gestionale HR,Development,App Server 1,hr-app-dev-01.internal,Application Server,10.4.1.11
+Gestionale HR,Development,DB Server 1,hr-db-dev-01.internal,Database Server,10.4.1.12
+Gestionale HR,Pre-Produzione,Web Server 1,hr-web-preprod-01.internal,Web Server,10.4.3.10
+Gestionale HR,Pre-Produzione,App Server 1,hr-app-preprod-01.internal,Application Server,10.4.3.11
+Gestionale HR,Pre-Produzione,DB Server 1,hr-db-preprod-01.internal,Database Server,10.4.3.12
+Gestionale HR,Produzione,Web Server 1,hr-web-prod-01.internal,Web Server,10.4.4.10
+Gestionale HR,Produzione,App Server 1,hr-app-prod-01.internal,Application Server,10.4.4.11
+Gestionale HR,Produzione,DB Server 1,hr-db-prod-01.internal,Database Server,10.4.4.12
