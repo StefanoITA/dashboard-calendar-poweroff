@@ -3,12 +3,14 @@
     {
       "id": "mario.rossi",
       "name": "Mario Rossi",
+      "github_user": "mario-rossi",
       "role": "Admin",
       "applications": ["*"]
     },
     {
       "id": "luca.bianchi",
       "name": "Luca Bianchi",
+      "github_user": "luca-bianchi",
       "role": "Application_owner",
       "applications": {
         "Portale Clienti": "rw",
@@ -19,6 +21,7 @@
     {
       "id": "anna.verdi",
       "name": "Anna Verdi",
+      "github_user": "anna-verdi",
       "role": "Application_owner",
       "applications": {
         "ERP Finance": "rw",
@@ -30,6 +33,7 @@
     {
       "id": "paolo.neri",
       "name": "Paolo Neri",
+      "github_user": "paolo-neri",
       "role": "Application_owner",
       "applications": {
         "Gestionale HR": "rw",
@@ -39,6 +43,7 @@
     {
       "id": "giulia.martini",
       "name": "Giulia Martini",
+      "github_user": "giulia-martini",
       "role": "Application_owner",
       "applications": {
         "Piattaforma E-Commerce": "rw",
@@ -49,12 +54,14 @@
     {
       "id": "viewer",
       "name": "Visualizzatore Globale",
+      "github_user": "viewer-global",
       "role": "Read-Only",
       "applications": ["*"]
     },
     {
       "id": "marco.belli",
       "name": "Marco Belli",
+      "github_user": "marco-belli",
       "role": "Read-Only",
       "applications": {
         "Portale Clienti": "ro",

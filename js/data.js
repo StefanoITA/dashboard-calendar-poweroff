@@ -60,6 +60,11 @@ const DataManager = (() => {
 
     function getUsers() { return users; }
 
+    function findUserByGitHub(githubUsername) {
+        if (!githubUsername) return null;
+        return users.find(u => u.github_user && u.github_user.toLowerCase() === githubUsername.toLowerCase()) || null;
+    }
+
     function setCurrentUser(userId) {
         currentUser = users.find(u => u.id === userId) || null;
         if (currentUser) AuditLog.setUser(currentUser);
@@ -617,7 +622,7 @@ const DataManager = (() => {
 
     return {
         loadFromFile, loadFromPath, loadUsers, loadFromDynamo, loadMessages,
-        getUsers, setCurrentUser, getCurrentUser, isReadOnly, isAppReadOnly, getAppPermission,
+        getUsers, findUserByGitHub, setCurrentUser, getCurrentUser, isReadOnly, isAppReadOnly, getAppPermission,
         canAccessApp, getAccessibleAppEnvPairs,
         getApplications, getEnvironments, getMachines,
         getScheduleEntries, addScheduleEntry, updateScheduleEntry, removeScheduleEntry,
