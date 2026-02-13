@@ -50,35 +50,77 @@ const App = (() => {
     };
 
     // ============================================
-    // SSO Configuration (GitHub Enterprise)
+    // SSO Configuration (GitHub Enterprise OAuth)
     // ============================================
     const SSO_CONFIG = {
         enabled: true,
-        gheBaseUrl: 'https://github.AZIENDA.com'  // <-- SOSTITUIRE con il dominio GitHub Enterprise reale
+        gheBaseUrl: 'https://github.AZIENDA.com',              // <-- Dominio GitHub Enterprise
+        oauthClientId: 'YOUR_OAUTH_CLIENT_ID',                 // <-- Client ID dell'OAuth App
+        oauthCallbackUrl: 'https://pages.github.AZIENDA.com/PATH/',  // <-- URL del sito (callback)
+        oauthExchangeUrl: 'https://YOUR_LAMBDA_URL'  // <-- URL della Lambda (root, senza path)
     };
+
+    const SSO_STORAGE_KEY = 'shutdownScheduler_gheLogin';
 
     function getCookie(name) {
         const match = document.cookie.match(new RegExp('(?:^|;\\s*)' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
         return match ? decodeURIComponent(match[1]) : null;
     }
 
-    async function fetchGHEUser() {
+    function startOAuthFlow() {
+        const params = new URLSearchParams({
+            client_id: SSO_CONFIG.oauthClientId,
+            redirect_uri: SSO_CONFIG.oauthCallbackUrl,
+            scope: 'read:user'
+        });
+        window.location.href = `${SSO_CONFIG.gheBaseUrl}/login/oauth/authorize?${params}`;
+    }
+
+    async function exchangeOAuthCode(code) {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 5000);
+        const timeout = setTimeout(() => controller.abort(), 10000);
         try {
-            const resp = await fetch(`${SSO_CONFIG.gheBaseUrl}/api/v3/user`, {
-                credentials: 'include',
+            const resp = await fetch(SSO_CONFIG.oauthExchangeUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code }),
                 signal: controller.signal
             });
             clearTimeout(timeout);
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             const data = await resp.json();
-            return data.login || null;
+            if (data.login) {
+                console.log('[SSO] OAuth exchange successful:', data.login);
+                return data.login;
+            }
+            throw new Error(data.error || 'No login in response');
         } catch (err) {
             clearTimeout(timeout);
-            console.warn('[SSO] GHE API fetch failed:', err.message);
+            console.error('[SSO] OAuth exchange failed:', err.message);
             return null;
         }
+    }
+
+    function showGitHubLinkScreen() {
+        const overlay = document.createElement('div');
+        overlay.className = 'unauthorized-overlay';
+        overlay.innerHTML = `
+            <div class="unauthorized-card github-link-card">
+                <div class="github-link-icon">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+                </div>
+                <h2>Accedi con GitHub Enterprise</h2>
+                <p>Per utilizzare l'applicazione, collega il tuo account GitHub Enterprise aziendale.</p>
+                <div class="unauthorized-actions">
+                    <button class="btn-primary github-link-btn" id="githubLinkBtn">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+                        Collega GitHub Enterprise
+                    </button>
+                </div>
+                <p class="unauthorized-sub">Verrai reindirizzato a <strong>${SSO_CONFIG.gheBaseUrl.replace('https://', '')}</strong> per autorizzare l'accesso.</p>
+            </div>`;
+        document.body.appendChild(overlay);
+        document.getElementById('githubLinkBtn').addEventListener('click', startOAuthFlow);
     }
 
     // ============================================
@@ -263,29 +305,35 @@ const App = (() => {
 
         const users = DataManager.getUsers();
 
-        // SSO Authentication Cascade
+        // SSO Authentication via OAuth
         if (SSO_CONFIG.enabled) {
             let ghUsername = null;
 
-            // 1. Try GitHub Enterprise API (/api/v3/user with session cookies)
-            ghUsername = await fetchGHEUser();
-            if (ghUsername) {
-                console.log('[SSO] Authenticated via GHE API as:', ghUsername);
-            }
-
-            // 2. Fallback: try dotcom_user cookie (works only if not HttpOnly)
-            if (!ghUsername) {
-                const gheCookie = getCookie('dotcom_user');
-                if (gheCookie) {
-                    ghUsername = gheCookie;
-                    console.log('[SSO] Authenticated via cookie as:', ghUsername);
+            // 1. Check for OAuth callback (?code= in URL)
+            const urlParams = new URLSearchParams(window.location.search);
+            const oauthCode = urlParams.get('code');
+            if (oauthCode) {
+                // Clean the URL (remove ?code= from address bar)
+                window.history.replaceState({}, document.title, window.location.pathname);
+                // Exchange code for user login via Lambda
+                ghUsername = await exchangeOAuthCode(oauthCode);
+                if (ghUsername) {
+                    localStorage.setItem(SSO_STORAGE_KEY, ghUsername);
                 }
             }
 
-            // 3. No method worked → error
+            // 2. Check localStorage for previous OAuth session
             if (!ghUsername) {
-                console.error('[SSO] Authentication failed: no GHE API response and no cookie');
-                showUnauthorizedScreen(null, true);
+                const storedLogin = localStorage.getItem(SSO_STORAGE_KEY);
+                if (storedLogin) {
+                    ghUsername = storedLogin;
+                    console.log('[SSO] Restored session:', ghUsername);
+                }
+            }
+
+            // 3. No session → show "Collega GitHub Enterprise" screen
+            if (!ghUsername) {
+                showGitHubLinkScreen();
                 return;
             }
 
@@ -297,7 +345,8 @@ const App = (() => {
                 localStorage.setItem('shutdownScheduler_userId', ssoUser.id);
                 console.log('[SSO] User matched:', ssoUser.name, '(' + ssoUser.role + ')');
             } else {
-                showUnauthorizedScreen(ghUsername, false);
+                localStorage.removeItem(SSO_STORAGE_KEY);
+                showUnauthorizedScreen(ghUsername);
                 return;
             }
         } else {
@@ -306,7 +355,7 @@ const App = (() => {
             const matchedUser = users.find(u => u.id === savedUserId);
 
             if (savedUserId && !matchedUser) {
-                showUnauthorizedScreen(savedUserId, false);
+                showUnauthorizedScreen(savedUserId);
                 return;
             }
 
@@ -340,24 +389,18 @@ const App = (() => {
     // ============================================
     // Unauthorized Screen
     // ============================================
-    function showUnauthorizedScreen(userId, ssoFailed) {
+    function showUnauthorizedScreen(userId) {
         isUnauthorized = true;
         const overlay = document.createElement('div');
         overlay.className = 'unauthorized-overlay';
 
         let title, message, sub, actions;
-        if (ssoFailed) {
-            // SSO enabled but could not identify user at all
-            title = 'Autenticazione SSO non riuscita';
-            message = 'Non \u00e8 stato possibile identificare l\'utente tramite GitHub Enterprise.';
-            sub = `Verificare di aver effettuato il login su <strong>${SSO_CONFIG.gheBaseUrl.replace('https://', '')}</strong> e che la sessione sia attiva.<br>Se il problema persiste, verificare che CORS sia configurato correttamente per il dominio Pages.`;
-            actions = '<button class="btn-primary" onclick="location.reload();">Riprova</button>';
-        } else if (userId && SSO_CONFIG.enabled) {
-            // SSO worked but user not in users.json
+        if (userId && SSO_CONFIG.enabled) {
+            // OAuth worked but user not in users.json
             title = 'Accesso non autorizzato';
             message = `L'utenza GitHub Enterprise <strong>${userId}</strong> non \u00e8 associata a nessun profilo in questa applicazione.`;
             sub = 'Richiedere a un amministratore di aggiungere il proprio <code>github_user</code> nel file <code>users.json</code>.';
-            actions = '';
+            actions = `<button class="btn-primary" onclick="localStorage.removeItem('${SSO_STORAGE_KEY}');location.reload();">Riprova con altro account</button>`;
         } else {
             // Local mode — unknown user ID
             title = 'Accesso non autorizzato';
