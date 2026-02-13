@@ -399,23 +399,25 @@ Quando l'applicazione e ospitata su **GitHub Enterprise Pages**, l'autenticazion
 ### Come Funziona
 
 ```
-Browser (pages.github.X.com)        GitHub Enterprise          Lambda (API Gateway)
-      |                                   |                          |
- 1. Click "Collega GitHub"               |                          |
-      |--- redirect /login/oauth/auth -->|                          |
-      |                                   | (SSO session check)     |
-      |<--- redirect ?code=abc123 -------|                          |
-      |                                                              |
- 2. POST { code } ------------------------------------------------>|
-      |                                   |<-- POST /access_token --|
-      |                                   |-- token:xxx ----------->|
-      |                                   |<-- GET /api/v3/user ----|
-      |                                   |-- { login } ----------->|
-      |<--- { login: "username" } ---------------------------------|
-      |
- 3. Match login vs users.json → auto-login
-      | (salva in localStorage per visite successive)
+Browser                         GitHub Enterprise              Lambda (Python)
+   |                                  |                             |
+1. Click "Collega GitHub"            |                             |
+   |--- GET /login/oauth/authorize ->|                             |
+   |    redirect_uri=LAMBDA_URL      |                             |
+   |                                  | (SSO session)              |
+   |<-- 302 LAMBDA_URL?code=abc ----|                             |
+   |                                                                |
+   |--- GET LAMBDA_URL?code=abc ---------------------------------->|
+   |                                  |<-- POST /access_token -----|
+   |                                  |-- token:xxx -------------->|
+   |                                  |<-- GET /api/v3/user -------|
+   |                                  |-- { login:"user" } ------->|
+   |<-- 302 pages.github.X.com/?ghuser=user -----------------------|
+   |
+2. Frontend legge ?ghuser= → salva in localStorage → login automatico
 ```
+
+Tutto avviene via redirect del browser. Nessuna chiamata CORS dal frontend.
 
 ### Setup Passo-Passo
 
@@ -425,34 +427,37 @@ Browser (pages.github.X.com)        GitHub Enterprise          Lambda (API Gatew
 2. Compilare:
    - **Application name**: `Shutdown Scheduler`
    - **Homepage URL**: `https://pages.github.AZIENDA.com/PATH/`
-   - **Authorization callback URL**: `https://pages.github.AZIENDA.com/PATH/` (stessa URL)
+   - **Authorization callback URL**: l'URL della Lambda (es. `https://YOUR_LAMBDA_URL`)
 3. Cliccare **Register application**
 4. Copiare il **Client ID**
 5. Generare e copiare il **Client Secret**
 
 #### B. Deployare la Lambda
 
-1. Creare una nuova Lambda AWS con il codice in `lambda/oauth-github.js`
-2. Impostare le **variabili d'ambiente**:
-   - `GHE_BASE_URL` = `https://github.AZIENDA.com` (dominio GHE reale)
-   - `OAUTH_CLIENT_ID` = Client ID dal passo A
-   - `OAUTH_CLIENT_SECRET` = Client Secret dal passo A
-   - `ALLOWED_ORIGIN` = `https://pages.github.AZIENDA.com` (dominio Pages reale)
-3. La Lambda deve poter raggiungere `github.AZIENDA.com` dalla rete interna
-4. La Lambda risponde alla root (non serve path aggiuntivo)
-5. Abilitare CORS sulla Lambda
+1. Creare una nuova Lambda AWS (Python 3.14) con il codice in `lambda/oauth-github.py`
+2. La Lambda risponde alla root (non serve path aggiuntivo), riceve `?code=` via GET
+3. Impostare le **variabili d'ambiente**:
+
+| Variabile | Valore |
+|-----------|--------|
+| `GHE_BASE_URL` | `https://github.AZIENDA.com` (dominio GHE reale) |
+| `OAUTH_CLIENT_ID` | Client ID dal passo A |
+| `OAUTH_CLIENT_SECRET` | Client Secret dal passo A |
+| `REDIRECT_URL` | `https://pages.github.AZIENDA.com/PATH/` (URL del sito Pages) |
+| `SSL_VERIFY` | `true` (default) oppure `false` per certificati interni |
+
+4. La Lambda deve poter raggiungere `github.AZIENDA.com` dalla rete
 
 #### C. Configurare il Frontend
 
-In `js/app.js`, riga ~55, sostituire i placeholder in `SSO_CONFIG`:
+In `js/app.js`, riga ~55, sostituire i 3 placeholder in `SSO_CONFIG`:
 
 ```javascript
 const SSO_CONFIG = {
     enabled: true,
-    gheBaseUrl: 'https://github.AZIENDA.com',                          // Dominio GHE reale
-    oauthClientId: 'YOUR_OAUTH_CLIENT_ID',                             // Client ID
-    oauthCallbackUrl: 'https://pages.github.AZIENDA.com/PATH/',        // URL del sito
-    oauthExchangeUrl: 'https://YOUR_LAMBDA_URL'  // URL della Lambda (root, senza path)
+    gheBaseUrl: 'https://github.AZIENDA.com',      // Dominio GHE reale
+    oauthClientId: 'YOUR_OAUTH_CLIENT_ID',          // Client ID
+    oauthLambdaUrl: 'https://YOUR_LAMBDA_URL'       // URL della Lambda (root)
 };
 ```
 
@@ -484,8 +489,8 @@ Per sviluppo locale, impostare `SSO_CONFIG.enabled = false` in `js/app.js`. Ques
 | Problema | Soluzione |
 |----------|-----------|
 | Bottone "Collega GitHub" non fa nulla | Verificare `oauthClientId` e `gheBaseUrl` in `SSO_CONFIG` |
-| Errore dopo redirect da GHE | Verificare che `oauthCallbackUrl` corrisponda esattamente alla callback URL dell'OAuth App |
-| "Token exchange failed" nella console | Verificare che la Lambda possa raggiungere GHE e che `OAUTH_CLIENT_SECRET` sia corretto |
+| Errore dopo redirect da GHE | Verificare che la callback URL dell'OAuth App corrisponda esattamente all'URL della Lambda |
+| `?ghuser_error=` nell'URL dopo redirect | Controllare i CloudWatch Logs della Lambda; verificare che possa raggiungere GHE e che `OAUTH_CLIENT_SECRET` sia corretto |
 | Utente non riconosciuto dopo login | Aggiungere il `github_user` corretto in `users.json` |
 | Per discollegare l'account | Cancellare `shutdownScheduler_gheLogin` da localStorage (DevTools → Application → Local Storage) |
 

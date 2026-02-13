@@ -56,49 +56,18 @@ const App = (() => {
         enabled: true,
         gheBaseUrl: 'https://github.AZIENDA.com',              // <-- Dominio GitHub Enterprise
         oauthClientId: 'YOUR_OAUTH_CLIENT_ID',                 // <-- Client ID dell'OAuth App
-        oauthCallbackUrl: 'https://pages.github.AZIENDA.com/PATH/',  // <-- URL del sito (callback)
-        oauthExchangeUrl: 'https://YOUR_LAMBDA_URL'  // <-- URL della Lambda (root, senza path)
+        oauthLambdaUrl: 'https://YOUR_LAMBDA_URL'              // <-- URL della Lambda (root)
     };
 
     const SSO_STORAGE_KEY = 'shutdownScheduler_gheLogin';
 
-    function getCookie(name) {
-        const match = document.cookie.match(new RegExp('(?:^|;\\s*)' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
-        return match ? decodeURIComponent(match[1]) : null;
-    }
-
     function startOAuthFlow() {
         const params = new URLSearchParams({
             client_id: SSO_CONFIG.oauthClientId,
-            redirect_uri: SSO_CONFIG.oauthCallbackUrl,
+            redirect_uri: SSO_CONFIG.oauthLambdaUrl,
             scope: 'read:user'
         });
         window.location.href = `${SSO_CONFIG.gheBaseUrl}/login/oauth/authorize?${params}`;
-    }
-
-    async function exchangeOAuthCode(code) {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 10000);
-        try {
-            const resp = await fetch(SSO_CONFIG.oauthExchangeUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ code }),
-                signal: controller.signal
-            });
-            clearTimeout(timeout);
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            const data = await resp.json();
-            if (data.login) {
-                console.log('[SSO] OAuth exchange successful:', data.login);
-                return data.login;
-            }
-            throw new Error(data.error || 'No login in response');
-        } catch (err) {
-            clearTimeout(timeout);
-            console.error('[SSO] OAuth exchange failed:', err.message);
-            return null;
-        }
     }
 
     function showGitHubLinkScreen() {
@@ -309,17 +278,21 @@ const App = (() => {
         if (SSO_CONFIG.enabled) {
             let ghUsername = null;
 
-            // 1. Check for OAuth callback (?code= in URL)
+            // 1. Check for OAuth redirect from Lambda (?ghuser= or ?ghuser_error= in URL)
             const urlParams = new URLSearchParams(window.location.search);
-            const oauthCode = urlParams.get('code');
-            if (oauthCode) {
-                // Clean the URL (remove ?code= from address bar)
+            const oauthLogin = urlParams.get('ghuser');
+            const oauthError = urlParams.get('ghuser_error');
+            // Clean the URL
+            if (oauthLogin || oauthError) {
                 window.history.replaceState({}, document.title, window.location.pathname);
-                // Exchange code for user login via Lambda
-                ghUsername = await exchangeOAuthCode(oauthCode);
-                if (ghUsername) {
-                    localStorage.setItem(SSO_STORAGE_KEY, ghUsername);
-                }
+            }
+            if (oauthError) {
+                console.error('[SSO] OAuth error:', oauthError);
+            }
+            if (oauthLogin) {
+                ghUsername = oauthLogin;
+                localStorage.setItem(SSO_STORAGE_KEY, ghUsername);
+                console.log('[SSO] OAuth login:', ghUsername);
             }
 
             // 2. Check localStorage for previous OAuth session
