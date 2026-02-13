@@ -14,6 +14,7 @@ const App = (() => {
     let gcDate = new Date();
     let gcActiveFilters = new Set();
     let gcActiveEnvFilters = new Set();
+    let gcEnvFiltersInitialized = false;
     let isUnauthorized = false;
     let unsavedReminderTimer = null;
     let unsavedPopupShown = false;
@@ -627,10 +628,7 @@ const App = (() => {
                     <div>
                         <div class="home-greeting">${greeting},</div>
                         <h1 class="home-user-name">${firstName}!</h1>
-                        <p class="home-subtitle">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                            Shutdown Scheduler
-                        </p>
+                        <p class="home-tool-desc">Pianifica e coordina i periodi di shutdown e accensione degli ambienti applicativi, incrociando i dati con gli altri Application Owner per evitare conflitti e gestire le dipendenze tra applicazioni.</p>
                     </div>
                 </div>
             </div>`;
@@ -691,12 +689,15 @@ const App = (() => {
 
         screen.innerHTML = html;
 
-        // Bind app rows to navigate
+        // Bind app rows — click sidebar item to show env popover
         screen.querySelectorAll('.home-app-row').forEach(row => {
             row.addEventListener('click', () => {
                 const appName = row.dataset.app;
                 const item = document.querySelector(`#appList .nav-item[data-app="${appName}"]`);
-                if (item) selectApp(appName, item);
+                if (item) {
+                    item.click();
+                    item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                }
             });
         });
     }
@@ -1002,7 +1003,7 @@ const App = (() => {
                 <div class="confirm-dialog-body" style="padding:24px 24px 8px;text-align:left;">
                     <h4>Aggiungi Nota</h4>
                     <p style="margin-bottom:8px;">Inserisci una nota per <strong>${hostname}</strong></p>
-                    <p style="font-size:0.74rem;color:var(--text-tertiary);margin-bottom:12px;">Le note sono private e salvate solo localmente nel tuo browser.</p>
+                    <div class="note-privacy-box"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> Le note sono private e salvate solo localmente nel tuo browser.</div>
                     <textarea class="note-textarea" id="noteInput" rows="3" placeholder="Scrivi qui la nota..."></textarea>
                 </div>
                 <div class="confirm-dialog-actions">
@@ -1265,8 +1266,11 @@ const App = (() => {
         apps.forEach(a => DataManager.getEnvironments(a.name).forEach(e => allEnvNames.add(e.name)));
         const envList = [...allEnvNames].sort();
 
-        // Initialize env filters if empty
-        if (gcActiveEnvFilters.size === 0) envList.forEach(e => gcActiveEnvFilters.add(e));
+        // Initialize env filters on first open
+        if (!gcEnvFiltersInitialized) {
+            envList.forEach(e => gcActiveEnvFilters.add(e));
+            gcEnvFiltersInitialized = true;
+        }
 
         const container = $('#gcFilters');
         container.innerHTML = '';
@@ -1367,11 +1371,17 @@ const App = (() => {
             }
         });
 
+        // Build color map: use same colors as filter chips
+        const apps = DataManager.getApplications();
+        const appColorMap = {};
+        apps.forEach((a, i) => { appColorMap[a.name] = appColors[i % appColors.length]; });
+        const aeColors = {};
         const allAppEnvs = new Set();
         Object.values(dateMap).forEach(map => map.forEach((_, k) => allAppEnvs.add(k)));
-        const aeColors = {};
-        let ci = 0;
-        allAppEnvs.forEach(k => { aeColors[k] = appColors[ci % appColors.length]; ci++; });
+        allAppEnvs.forEach(k => {
+            const appName = k.split(' - ')[0];
+            aeColors[k] = appColorMap[appName] || '#7a7a96';
+        });
 
         const grid = $('#gcGrid');
         const fragment = document.createDocumentFragment();
@@ -1400,8 +1410,7 @@ const App = (() => {
             let tagsHtml = '';
             appEnvMap.forEach((count, k) => {
                 const color = aeColors[k];
-                const shortName = k.length > 22 ? k.substring(0, 20) + '\u2026' : k;
-                tagsHtml += `<span class="gc-tag" style="background:${color}18;color:${color};border-color:${color}35" title="${k}: ${count} server">${shortName} <span class="gc-tag-count">(${count})</span></span>`;
+                tagsHtml += `<span class="gc-tag" style="background:${color}18;color:${color};border-color:${color}35" title="${k}: ${count} server">${k}</span>`;
             });
 
             cell.innerHTML = `<div class="gc-day-number">${d}</div><div class="gc-tags">${tagsHtml}</div>`;
@@ -1567,7 +1576,7 @@ const App = (() => {
                     icon.textContent = sortAsc ? '\u25B2' : '\u25BC';
                     th.classList.add('vm-th-sorted');
                 } else {
-                    icon.textContent = '';
+                    icon.textContent = '\u2195';
                     th.classList.remove('vm-th-sorted');
                 }
             });
@@ -1577,8 +1586,8 @@ const App = (() => {
                 const checked = selectedRows.has(m.hostname) ? 'checked' : '';
                 return `<tr class="${checked ? 'vm-row-selected' : ''}" data-hostname="${m.hostname}">
                     <td class="vm-td-check"><input type="checkbox" class="vm-row-check" data-hostname="${m.hostname}" ${checked}></td>
-                    <td class="vm-cell-name vm-cell-copyable" data-copy="${m.machine_name}" title="Clicca per copiare">${m.machine_name}</td>
-                    <td class="vm-cell-hostname vm-cell-copyable" data-copy="${m.hostname}" title="Clicca per copiare"><code>${m.hostname}</code></td>
+                    <td class="vm-cell-name vm-cell-copyable" data-copy="${m.machine_name}" title="Clicca per copiare">${m.machine_name} <span class="vm-copy-hint">${SVG.copy}</span></td>
+                    <td class="vm-cell-hostname vm-cell-copyable" data-copy="${m.hostname}" title="Clicca per copiare"><code>${m.hostname}</code> <span class="vm-copy-hint">${SVG.copy}</span></td>
                     <td class="vm-cell-app">${m.application}</td>
                     <td class="vm-cell-env"><span class="vm-env-badge" style="background:${eColor}14;color:${eColor};border-color:${eColor}30">${m.environment}</span></td>
                     <td class="vm-cell-instance"><code class="vm-instance-code">${m.instance_type || '-'}</code></td>
