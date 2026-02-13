@@ -294,10 +294,13 @@ const App = (() => {
         const overlay = document.createElement('div');
         overlay.className = 'connection-error-overlay';
         overlay.innerHTML = `
-            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
             <h2>Impossibile collegarsi alla base dati</h2>
-            <p>Non \u00e8 stato possibile recuperare lo stato attuale da DynamoDB. Verificare la connessione e ricaricare la pagina.</p>
-            <button class="btn-primary" onclick="location.reload()">Ricarica Pagina</button>`;
+            <p>Non \u00e8 stato possibile recuperare lo stato attuale da DynamoDB dopo ${DynamoService.CONFIG.retryAttempts + 1} tentativi.<br>Verificare la connessione di rete e l'endpoint API Gateway.</p>
+            <button class="btn-primary" onclick="location.reload()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                Ricarica Pagina
+            </button>`;
         document.body.appendChild(overlay);
     }
 
@@ -652,13 +655,16 @@ const App = (() => {
             html += '</div>';
         }
 
-        // Minimal app list
-        html += '<div class="home-section-title" style="margin-top:16px;">Applicazioni</div>';
+        // Two-column layout: Apps (left) + Activity (right)
+        html += '<div class="home-columns">';
+
+        // Left column — Applications
+        html += '<div class="home-col-left">';
+        html += '<div class="home-section-title">Applicazioni</div>';
         html += '<div class="home-app-list">';
         apps.forEach((app, i) => {
             const color = appColors[i % appColors.length];
             const perm = DataManager.getAppPermission(app.name);
-            const roleLabels = { 'Admin': 'Admin', 'Application_owner': 'Application Owner', 'Read-Only': 'Sola Lettura' };
             const permLabel = user && user.role === 'Admin' ? 'Admin' : perm === 'rw' ? 'Application Owner' : 'Sola Lettura';
             const permCls = perm === 'rw' ? 'perm-rw' : 'perm-ro';
 
@@ -671,9 +677,11 @@ const App = (() => {
             </div>`;
         });
         html += '</div>';
+        html += '</div>';
 
-        // Recent Activity
-        html += '<div class="home-section-title" style="margin-top:24px;">Attivit\u00e0 Recente</div>';
+        // Right column — Recent Activity
+        html += '<div class="home-col-right">';
+        html += '<div class="home-section-title">Attivit\u00e0 Recente</div>';
         if (recentLogs.length === 0) {
             html += '<div class="home-empty">Nessuna attivit\u00e0 registrata</div>';
         } else {
@@ -686,6 +694,9 @@ const App = (() => {
             });
             html += '</div>';
         }
+        html += '</div>';
+
+        html += '</div>'; // close home-columns
 
         screen.innerHTML = html;
 
@@ -1371,16 +1382,21 @@ const App = (() => {
             }
         });
 
-        // Build color map: use same colors as filter chips
+        // Build color map: app color + env color for dual-indicator
         const apps = DataManager.getApplications();
         const appColorMap = {};
         apps.forEach((a, i) => { appColorMap[a.name] = appColors[i % appColors.length]; });
-        const aeColors = {};
+        const aeColorPairs = {};
         const allAppEnvs = new Set();
         Object.values(dateMap).forEach(map => map.forEach((_, k) => allAppEnvs.add(k)));
         allAppEnvs.forEach(k => {
-            const appName = k.split(' - ')[0];
-            aeColors[k] = appColorMap[appName] || '#7a7a96';
+            const parts = k.split(' - ');
+            const appName = parts[0];
+            const envName = parts.length > 1 ? parts.slice(1).join(' - ') : '';
+            aeColorPairs[k] = {
+                app: appColorMap[appName] || '#7a7a96',
+                env: envColors[envName] || '#7a7a96'
+            };
         });
 
         const grid = $('#gcGrid');
@@ -1409,8 +1425,8 @@ const App = (() => {
 
             let tagsHtml = '';
             appEnvMap.forEach((count, k) => {
-                const color = aeColors[k];
-                tagsHtml += `<span class="gc-tag" style="background:${color}18;color:${color};border-color:${color}35" title="${k}: ${count} server">${k}</span>`;
+                const cp = aeColorPairs[k] || { app: '#7a7a96', env: '#7a7a96' };
+                tagsHtml += `<span class="gc-tag" style="background:${cp.app}14;color:${cp.app};border-color:${cp.app}30" title="${k}: ${count} server"><span class="gc-tag-env" style="background:${cp.env}"></span>${k}</span>`;
             });
 
             cell.innerHTML = `<div class="gc-day-number">${d}</div><div class="gc-tags">${tagsHtml}</div>`;
@@ -1720,7 +1736,13 @@ const App = (() => {
     // ============================================
     // Refresh / Fetch State
     // ============================================
+    let isRefreshing = false;
+
     async function handleRefresh() {
+        if (isRefreshing) return;
+        isRefreshing = true;
+        const refreshBtn = $('#refreshBtn');
+        refreshBtn.classList.add('spinning');
         showToast('Aggiornamento in corso...', 'info');
         try {
             await DataManager.loadFromPath('data/machines.csv');
@@ -1747,7 +1769,11 @@ const App = (() => {
             AuditLog.log('Aggiornamento stato', 'Dati ricaricati');
             showToast('Stato aggiornato', 'success');
         } catch (err) {
-            showToast('Errore durante l\'aggiornamento', 'error');
+            console.error('[Refresh] Error:', err);
+            showToast('Errore durante l\'aggiornamento: ' + (err.message || 'Riprova'), 'error');
+        } finally {
+            isRefreshing = false;
+            refreshBtn.classList.remove('spinning');
         }
     }
 
@@ -1834,7 +1860,10 @@ const App = (() => {
         }, 15000);
     }
 
+    let isSaving = false;
+
     async function handleSaveConfig() {
+        if (isSaving) return; // Prevent double-save
         const changes = DynamoService.getModifiedAppEnvs(DataManager.getSchedulesRef());
         if (changes.length === 0) {
             showToast('Nessuna modifica da salvare', 'info');
@@ -1895,38 +1924,51 @@ const App = (() => {
         });
         if (!confirmed) return;
 
-        if (DynamoService.CONFIG.enabled) {
-            const user = DataManager.getCurrentUser();
-            // Enrich each hostname's entries with cronjob translation (per server)
-            const pushData = changes.map(c => {
-                const enriched = {};
-                for (const [hostname, entries] of Object.entries(c.data)) {
-                    enriched[hostname] = entries.map(e => ({
-                        ...e,
-                        cronjobs: DataManager.generateCronjobs([e])[0]?.crons || []
-                    }));
-                }
-                return { key: c.key, data: enriched };
-            });
-            try {
+        // Show loading state
+        const saveBtn = $('#saveConfigBtn');
+        isSaving = true;
+        saveBtn.disabled = true;
+        saveBtn.classList.add('saving');
+        clearUnsavedReminder();
+
+        try {
+            if (DynamoService.CONFIG.enabled) {
+                const user = DataManager.getCurrentUser();
+                // Enrich each hostname's entries with cronjob translation (per server)
+                const pushData = changes.map(c => {
+                    const enriched = {};
+                    for (const [hostname, entries] of Object.entries(c.data)) {
+                        enriched[hostname] = entries.map(e => ({
+                            ...e,
+                            cronjobs: DataManager.generateCronjobs([e])[0]?.crons || []
+                        }));
+                    }
+                    return { key: c.key, data: enriched };
+                });
                 const results = await DynamoService.saveMultiple(pushData, user ? user.id : 'unknown');
                 const failed = results.filter(r => !r.success);
                 if (failed.length > 0) {
-                    showToast(`Errore nel salvataggio di ${failed.length} ambienti`, 'error');
+                    showToast(`Errore nel salvataggio di ${failed.length}/${changes.length} ambienti. Riprova.`, 'error');
                 } else {
-                    showToast('Configurazione salvata su DynamoDB', 'success');
+                    showToast(`Configurazione salvata${DynamoService.CONFIG.enabled ? ' su DynamoDB' : ''} \u2014 ${changes.length} ambienti`, 'success');
                 }
-            } catch (err) {
-                showToast('Errore nel salvataggio: ' + err.message, 'error');
-                return;
+            } else {
+                showToast('Modifiche salvate in locale (DynamoDB non configurato)', 'success');
             }
-        } else {
-            showToast('Modifiche salvate in locale (DynamoDB non configurato)', 'success');
-        }
 
-        AuditLog.log('Salvataggio configurazione', `${changes.length} ambienti aggiornati`);
-        DynamoService.takeSnapshot(DataManager.getSchedulesRef());
-        updateChangesBadge();
+            AuditLog.log('Salvataggio configurazione', `${changes.length} ambienti aggiornati`);
+            DynamoService.takeSnapshot(DataManager.getSchedulesRef());
+            updateChangesBadge();
+        } catch (err) {
+            console.error('[Save] Error:', err);
+            showToast('Errore nel salvataggio: ' + (err.message || 'Errore sconosciuto'), 'error');
+        } finally {
+            isSaving = false;
+            saveBtn.classList.remove('saving');
+            // Re-evaluate button state
+            const remaining = DynamoService.getModifiedAppEnvs(DataManager.getSchedulesRef());
+            saveBtn.disabled = remaining.length === 0;
+        }
     }
 
     // ============================================
