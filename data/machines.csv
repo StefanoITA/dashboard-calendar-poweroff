@@ -1,183 +1,183 @@
-application,environment,machine_name,hostname,server_type,description
-Portale Clienti,Development,Web Server 1,web-dev-01.internal,Web Server,Frontend Apache - ambiente sviluppo
-Portale Clienti,Development,App Server 1,app-dev-01.internal,Application Server,Backend Tomcat - API REST
-Portale Clienti,Development,App Server 2,app-dev-02.internal,Application Server,Tomcat - servizi batch
-Portale Clienti,Development,DB Server 1,db-dev-01.internal,Database Server,PostgreSQL 15 - database principale
-Portale Clienti,Integration,Web Server 1,web-int-01.internal,Web Server,Nginx reverse proxy - test integrazione
-Portale Clienti,Integration,Web Server 2,web-int-02.internal,Web Server,Nginx - test load balancing
-Portale Clienti,Integration,App Server 1,app-int-01.internal,Application Server,Spring Boot - microservizi core
-Portale Clienti,Integration,App Server 2,app-int-02.internal,Application Server,Spring Boot - microservizi auth
-Portale Clienti,Integration,App Server 3,app-int-03.internal,Application Server,Spring Boot - microservizi notifiche
-Portale Clienti,Integration,DB Server 1,db-int-01.internal,Database Server,PostgreSQL 15 - replica integrazione
-Portale Clienti,Integration,DB Server 2,db-int-02.internal,Database Server,PostgreSQL 15 - test replica
-Portale Clienti,Bugfixing,Web Server 1,web-bug-01.internal,Web Server,Apache - ambiente bugfix
-Portale Clienti,Bugfixing,App Server 1,app-bug-01.internal,Application Server,Tomcat - riproduzione bug
-Portale Clienti,Bugfixing,DB Server 1,db-bug-01.internal,Database Server,PostgreSQL 15 - snapshot produzione
-Portale Clienti,Training,Web Server 1,web-train-01.internal,Web Server,Apache - formazione utenti
-Portale Clienti,Training,App Server 1,app-train-01.internal,Application Server,Tomcat - demo applicativo
-Portale Clienti,Training,DB Server 1,db-train-01.internal,Database Server,PostgreSQL 15 - dati demo
-Portale Clienti,Pre-Produzione,Web Server 1,web-preprod-01.internal,Web Server,Apache - mirror produzione
-Portale Clienti,Pre-Produzione,Web Server 2,web-preprod-02.internal,Web Server,Nginx - test SSL termination
-Portale Clienti,Pre-Produzione,App Server 1,app-preprod-01.internal,Application Server,Tomcat - validazione release
-Portale Clienti,Pre-Produzione,App Server 2,app-preprod-02.internal,Application Server,Tomcat - test performance
-Portale Clienti,Pre-Produzione,DB Server 1,db-preprod-01.internal,Database Server,PostgreSQL 15 - dati anonimizzati
-Portale Clienti,Produzione,Web Server 1,web-prod-01.internal,Web Server,Nginx LB - traffico primario
-Portale Clienti,Produzione,Web Server 2,web-prod-02.internal,Web Server,Nginx LB - traffico secondario
-Portale Clienti,Produzione,Web Server 3,web-prod-03.internal,Web Server,Nginx - CDN origin
-Portale Clienti,Produzione,App Server 1,app-prod-01.internal,Application Server,Tomcat cluster - nodo primario
-Portale Clienti,Produzione,App Server 2,app-prod-02.internal,Application Server,Tomcat cluster - nodo secondario
-Portale Clienti,Produzione,App Server 3,app-prod-03.internal,Application Server,Tomcat cluster - nodo terziario
-Portale Clienti,Produzione,DB Server 1,db-prod-01.internal,Database Server,PostgreSQL 15 - master
-Portale Clienti,Produzione,DB Server 2,db-prod-02.internal,Database Server,PostgreSQL 15 - replica read-only
-Portale Clienti,Produzione,DB Server 3,db-prod-03.internal,Database Server,PostgreSQL 15 - replica DR
-CRM Aziendale,Development,Web Server 1,crm-web-dev-01.internal,Web Server,React frontend - dev server
-CRM Aziendale,Development,Web Server 2,crm-web-dev-02.internal,Web Server,Storybook - component library
-CRM Aziendale,Development,App Server 1,crm-app-dev-01.internal,Application Server,Node.js Express - API sviluppo
-CRM Aziendale,Development,App Server 2,crm-app-dev-02.internal,Application Server,Node.js - worker processi async
-CRM Aziendale,Development,DB Server 1,crm-db-dev-01.internal,Database Server,MongoDB 7 - database CRM dev
-CRM Aziendale,Development,DB Server 2,crm-db-dev-02.internal,Database Server,Redis 7 - cache e sessioni dev
-CRM Aziendale,Integration,Web Server 1,crm-web-int-01.internal,Web Server,React build - test integration
-CRM Aziendale,Integration,App Server 1,crm-app-int-01.internal,Application Server,Node.js - test end-to-end
-CRM Aziendale,Integration,App Server 2,crm-app-int-02.internal,Application Server,Node.js - test performance
-CRM Aziendale,Integration,DB Server 1,crm-db-int-01.internal,Database Server,MongoDB 7 - dati test
-CRM Aziendale,Integration,DB Server 2,crm-db-int-02.internal,Database Server,Redis 7 - cache integration
-CRM Aziendale,Bugfixing,Web Server 1,crm-web-bug-01.internal,Web Server,React - riproduzione bug UI
-CRM Aziendale,Bugfixing,App Server 1,crm-app-bug-01.internal,Application Server,Node.js - debug e hotfix
-CRM Aziendale,Bugfixing,DB Server 1,crm-db-bug-01.internal,Database Server,MongoDB 7 - snapshot per debug
-CRM Aziendale,Training,Web Server 1,crm-web-train-01.internal,Web Server,React - ambiente formazione
-CRM Aziendale,Training,App Server 1,crm-app-train-01.internal,Application Server,Node.js - demo e training
-CRM Aziendale,Training,DB Server 1,crm-db-train-01.internal,Database Server,MongoDB 7 - dataset formazione
-CRM Aziendale,Pre-Produzione,Web Server 1,crm-web-preprod-01.internal,Web Server,React SSR - validazione pre-rilascio
-CRM Aziendale,Pre-Produzione,App Server 1,crm-app-preprod-01.internal,Application Server,Node.js - test accettazione
-CRM Aziendale,Pre-Produzione,App Server 2,crm-app-preprod-02.internal,Application Server,Node.js - test carico
-CRM Aziendale,Pre-Produzione,DB Server 1,crm-db-preprod-01.internal,Database Server,MongoDB 7 - dati pre-prod
-CRM Aziendale,Pre-Produzione,DB Server 2,crm-db-preprod-02.internal,Database Server,Redis 7 - cache pre-prod
-CRM Aziendale,Produzione,Web Server 1,crm-web-prod-01.internal,Web Server,React SSR - produzione
-CRM Aziendale,Produzione,Web Server 2,crm-web-prod-02.internal,Web Server,React SSR - replica
-CRM Aziendale,Produzione,App Server 1,crm-app-prod-01.internal,Application Server,Node.js cluster - produzione
-CRM Aziendale,Produzione,App Server 2,crm-app-prod-02.internal,Application Server,Node.js cluster - replica
-CRM Aziendale,Produzione,DB Server 1,crm-db-prod-01.internal,Database Server,MongoDB 7 - replica set prod
-CRM Aziendale,Produzione,DB Server 2,crm-db-prod-02.internal,Database Server,MongoDB 7 - replica set secondary
-CRM Aziendale,Produzione,DB Server 3,crm-db-prod-03.internal,Database Server,Redis 7 - cache cluster prod
-ERP Finance,Development,Web Server 1,erp-web-dev-01.internal,Web Server,SAP Fiori - UI sviluppo
-ERP Finance,Development,App Server 1,erp-app-dev-01.internal,Application Server,SAP Netweaver - sviluppo ABAP
-ERP Finance,Development,App Server 2,erp-app-dev-02.internal,Application Server,SAP PI - integrazione sviluppo
-ERP Finance,Development,DB Server 1,erp-db-dev-01.internal,Database Server,SQL Server 2022 - database ERP dev
-ERP Finance,Development,DB Server 2,erp-db-dev-02.internal,Database Server,SQL Server 2022 - data warehouse dev
-ERP Finance,Integration,Web Server 1,erp-web-int-01.internal,Web Server,SAP Fiori - test integrazione
-ERP Finance,Integration,App Server 1,erp-app-int-01.internal,Application Server,SAP Netweaver - test end-to-end
-ERP Finance,Integration,App Server 2,erp-app-int-02.internal,Application Server,SAP PI - test flussi
-ERP Finance,Integration,DB Server 1,erp-db-int-01.internal,Database Server,SQL Server 2022 - integration test
-ERP Finance,Bugfixing,App Server 1,erp-app-bug-01.internal,Application Server,SAP Netweaver - hotfix e patch
-ERP Finance,Bugfixing,App Server 2,erp-app-bug-02.internal,Application Server,SAP PI - debug integrazioni
-ERP Finance,Bugfixing,DB Server 1,erp-db-bug-01.internal,Database Server,SQL Server 2022 - repro bug
-ERP Finance,Training,Web Server 1,erp-web-train-01.internal,Web Server,SAP Fiori - formazione utenti
-ERP Finance,Training,App Server 1,erp-app-train-01.internal,Application Server,SAP Netweaver - sandbox training
-ERP Finance,Training,DB Server 1,erp-db-train-01.internal,Database Server,SQL Server 2022 - dati formazione
-ERP Finance,Pre-Produzione,Web Server 1,erp-web-preprod-01.internal,Web Server,SAP Fiori - UAT
-ERP Finance,Pre-Produzione,App Server 1,erp-app-preprod-01.internal,Application Server,SAP - UAT validazione utenti
-ERP Finance,Pre-Produzione,App Server 2,erp-app-preprod-02.internal,Application Server,SAP - batch processing test
-ERP Finance,Pre-Produzione,DB Server 1,erp-db-preprod-01.internal,Database Server,SQL Server 2022 - pre-release
-ERP Finance,Produzione,Web Server 1,erp-web-prod-01.internal,Web Server,SAP Fiori - portale produzione
-ERP Finance,Produzione,App Server 1,erp-app-prod-01.internal,Application Server,SAP Netweaver - produzione primario
-ERP Finance,Produzione,App Server 2,erp-app-prod-02.internal,Application Server,SAP Netweaver - produzione HA
-ERP Finance,Produzione,App Server 3,erp-app-prod-03.internal,Application Server,SAP PI - integrazione produzione
-ERP Finance,Produzione,DB Server 1,erp-db-prod-01.internal,Database Server,SQL Server 2022 - Always On primary
-ERP Finance,Produzione,DB Server 2,erp-db-prod-02.internal,Database Server,SQL Server 2022 - Always On secondary
-ERP Finance,Produzione,DB Server 3,erp-db-prod-03.internal,Database Server,SQL Server 2022 - data warehouse prod
-Data Analytics Platform,Development,Web Server 1,dap-web-dev-01.internal,Web Server,Grafana - dashboard sviluppo
-Data Analytics Platform,Development,App Server 1,dap-app-dev-01.internal,Application Server,Python Flask - ETL pipeline dev
-Data Analytics Platform,Development,App Server 2,dap-app-dev-02.internal,Application Server,Jupyter Hub - notebook sviluppo
-Data Analytics Platform,Development,DB Server 1,dap-db-dev-01.internal,Database Server,ClickHouse - data warehouse dev
-Data Analytics Platform,Development,DB Server 2,dap-db-dev-02.internal,Database Server,MinIO - object storage dev
-Data Analytics Platform,Integration,Web Server 1,dap-web-int-01.internal,Web Server,Grafana - test visualizzazioni
-Data Analytics Platform,Integration,App Server 1,dap-app-int-01.internal,Application Server,Python Flask - test pipeline
-Data Analytics Platform,Integration,App Server 2,dap-app-int-02.internal,Application Server,Spark - test job distribuiti
-Data Analytics Platform,Integration,DB Server 1,dap-db-int-01.internal,Database Server,ClickHouse - integration test
-Data Analytics Platform,Bugfixing,App Server 1,dap-app-bug-01.internal,Application Server,Flask - debug pipeline
-Data Analytics Platform,Bugfixing,DB Server 1,dap-db-bug-01.internal,Database Server,ClickHouse - repro issue dati
-Data Analytics Platform,Training,Web Server 1,dap-web-train-01.internal,Web Server,Grafana - formazione analisti
-Data Analytics Platform,Training,App Server 1,dap-app-train-01.internal,Application Server,Jupyter Hub - training data science
-Data Analytics Platform,Training,DB Server 1,dap-db-train-01.internal,Database Server,ClickHouse - dataset formazione
-Data Analytics Platform,Pre-Produzione,Web Server 1,dap-web-preprod-01.internal,Web Server,Grafana - validazione dashboard
-Data Analytics Platform,Pre-Produzione,App Server 1,dap-app-preprod-01.internal,Application Server,Airflow - test orchestrazione
-Data Analytics Platform,Pre-Produzione,DB Server 1,dap-db-preprod-01.internal,Database Server,ClickHouse - pre-produzione
-Data Analytics Platform,Produzione,Web Server 1,dap-web-prod-01.internal,Web Server,Grafana HA - dashboard prod
-Data Analytics Platform,Produzione,Web Server 2,dap-web-prod-02.internal,Web Server,Grafana HA - replica
-Data Analytics Platform,Produzione,App Server 1,dap-app-prod-01.internal,Application Server,Airflow - orchestrazione ETL
-Data Analytics Platform,Produzione,App Server 2,dap-app-prod-02.internal,Application Server,Spark cluster - elaborazione dati
-Data Analytics Platform,Produzione,DB Server 1,dap-db-prod-01.internal,Database Server,ClickHouse cluster - produzione
-Data Analytics Platform,Produzione,DB Server 2,dap-db-prod-02.internal,Database Server,ClickHouse cluster - replica
-Data Analytics Platform,Produzione,DB Server 3,dap-db-prod-03.internal,Database Server,MinIO cluster - object storage prod
-Gestionale HR,Development,Web Server 1,hr-web-dev-01.internal,Web Server,Angular frontend - sviluppo
-Gestionale HR,Development,App Server 1,hr-app-dev-01.internal,Application Server,.NET 8 API - servizi HR dev
-Gestionale HR,Development,App Server 2,hr-app-dev-02.internal,Application Server,.NET 8 - worker servizi background
-Gestionale HR,Development,DB Server 1,hr-db-dev-01.internal,Database Server,SQL Server 2022 - HR database dev
-Gestionale HR,Integration,Web Server 1,hr-web-int-01.internal,Web Server,Angular - test integrazione
-Gestionale HR,Integration,App Server 1,hr-app-int-01.internal,Application Server,.NET 8 - test API
-Gestionale HR,Integration,DB Server 1,hr-db-int-01.internal,Database Server,SQL Server 2022 - integration test
-Gestionale HR,Bugfixing,Web Server 1,hr-web-bug-01.internal,Web Server,Angular - riproduzione bug
-Gestionale HR,Bugfixing,App Server 1,hr-app-bug-01.internal,Application Server,.NET 8 - hotfix
-Gestionale HR,Bugfixing,DB Server 1,hr-db-bug-01.internal,Database Server,SQL Server 2022 - debug
-Gestionale HR,Training,Web Server 1,hr-web-train-01.internal,Web Server,Angular - formazione nuovi dipendenti
-Gestionale HR,Training,App Server 1,hr-app-train-01.internal,Application Server,.NET 8 - demo funzionalità
-Gestionale HR,Training,DB Server 1,hr-db-train-01.internal,Database Server,SQL Server 2022 - dati fittizi
-Gestionale HR,Pre-Produzione,Web Server 1,hr-web-preprod-01.internal,Web Server,Angular - validazione pre-rilascio
-Gestionale HR,Pre-Produzione,App Server 1,hr-app-preprod-01.internal,Application Server,.NET 8 - test accettazione
-Gestionale HR,Pre-Produzione,App Server 2,hr-app-preprod-02.internal,Application Server,.NET 8 - test integrazione payroll
-Gestionale HR,Pre-Produzione,DB Server 1,hr-db-preprod-01.internal,Database Server,SQL Server 2022 - dati mascherati
-Gestionale HR,Produzione,Web Server 1,hr-web-prod-01.internal,Web Server,Angular - portale dipendenti
-Gestionale HR,Produzione,Web Server 2,hr-web-prod-02.internal,Web Server,Angular - portale manager
-Gestionale HR,Produzione,App Server 1,hr-app-prod-01.internal,Application Server,.NET 8 API - produzione
-Gestionale HR,Produzione,App Server 2,hr-app-prod-02.internal,Application Server,.NET 8 API - produzione HA
-Gestionale HR,Produzione,DB Server 1,hr-db-prod-01.internal,Database Server,SQL Server 2022 - HR produzione
-Gestionale HR,Produzione,DB Server 2,hr-db-prod-02.internal,Database Server,SQL Server 2022 - HR replica
-Piattaforma E-Commerce,Development,Web Server 1,ecom-web-dev-01.internal,Web Server,Next.js - frontend sviluppo
-Piattaforma E-Commerce,Development,Web Server 2,ecom-web-dev-02.internal,Web Server,Storybook - design system
-Piattaforma E-Commerce,Development,App Server 1,ecom-app-dev-01.internal,Application Server,Go - API catalogo dev
-Piattaforma E-Commerce,Development,App Server 2,ecom-app-dev-02.internal,Application Server,Go - API ordini dev
-Piattaforma E-Commerce,Development,App Server 3,ecom-app-dev-03.internal,Application Server,Go - API pagamenti dev
-Piattaforma E-Commerce,Development,DB Server 1,ecom-db-dev-01.internal,Database Server,PostgreSQL 16 - catalogo dev
-Piattaforma E-Commerce,Development,DB Server 2,ecom-db-dev-02.internal,Database Server,Redis 7 - cache carrello dev
-Piattaforma E-Commerce,Integration,Web Server 1,ecom-web-int-01.internal,Web Server,Next.js - test E2E
-Piattaforma E-Commerce,Integration,App Server 1,ecom-app-int-01.internal,Application Server,Go - API integration test
-Piattaforma E-Commerce,Integration,App Server 2,ecom-app-int-02.internal,Application Server,Go - worker eventi int
-Piattaforma E-Commerce,Integration,DB Server 1,ecom-db-int-01.internal,Database Server,PostgreSQL 16 - test integrazione
-Piattaforma E-Commerce,Integration,DB Server 2,ecom-db-int-02.internal,Database Server,Elasticsearch - ricerca prodotti int
-Piattaforma E-Commerce,Training,Web Server 1,ecom-web-train-01.internal,Web Server,Next.js - demo e-commerce
-Piattaforma E-Commerce,Training,App Server 1,ecom-app-train-01.internal,Application Server,Go - API formazione
-Piattaforma E-Commerce,Training,DB Server 1,ecom-db-train-01.internal,Database Server,PostgreSQL 16 - catalogo demo
-Piattaforma E-Commerce,Pre-Produzione,Web Server 1,ecom-web-preprod-01.internal,Web Server,Next.js - UAT
-Piattaforma E-Commerce,Pre-Produzione,Web Server 2,ecom-web-preprod-02.internal,Web Server,Next.js - test performance
-Piattaforma E-Commerce,Pre-Produzione,App Server 1,ecom-app-preprod-01.internal,Application Server,Go - API pre-prod
-Piattaforma E-Commerce,Pre-Produzione,App Server 2,ecom-app-preprod-02.internal,Application Server,Go - worker pre-prod
-Piattaforma E-Commerce,Pre-Produzione,DB Server 1,ecom-db-preprod-01.internal,Database Server,PostgreSQL 16 - pre-produzione
-Piattaforma E-Commerce,Pre-Produzione,DB Server 2,ecom-db-preprod-02.internal,Database Server,Redis 7 - pre-prod cache
-Piattaforma E-Commerce,Pre-Produzione,DB Server 3,ecom-db-preprod-03.internal,Database Server,Elasticsearch - pre-prod ricerca
-Piattaforma E-Commerce,Produzione,Web Server 1,ecom-web-prod-01.internal,Web Server,Next.js - frontend prod
-Piattaforma E-Commerce,Produzione,Web Server 2,ecom-web-prod-02.internal,Web Server,Next.js - frontend replica
-Piattaforma E-Commerce,Produzione,Web Server 3,ecom-web-prod-03.internal,Web Server,Next.js - CDN origin
-Piattaforma E-Commerce,Produzione,App Server 1,ecom-app-prod-01.internal,Application Server,Go - API catalogo prod
-Piattaforma E-Commerce,Produzione,App Server 2,ecom-app-prod-02.internal,Application Server,Go - API ordini prod
-Piattaforma E-Commerce,Produzione,App Server 3,ecom-app-prod-03.internal,Application Server,Go - API pagamenti prod
-Piattaforma E-Commerce,Produzione,App Server 4,ecom-app-prod-04.internal,Application Server,Go - worker eventi prod
-Piattaforma E-Commerce,Produzione,DB Server 1,ecom-db-prod-01.internal,Database Server,PostgreSQL 16 - master prod
-Piattaforma E-Commerce,Produzione,DB Server 2,ecom-db-prod-02.internal,Database Server,PostgreSQL 16 - replica read
-Piattaforma E-Commerce,Produzione,DB Server 3,ecom-db-prod-03.internal,Database Server,Redis 7 - cluster cache prod
-Piattaforma E-Commerce,Produzione,DB Server 4,ecom-db-prod-04.internal,Database Server,Elasticsearch - ricerca prodotti prod
-Sistema Notifiche,Development,App Server 1,notif-app-dev-01.internal,Application Server,Kotlin - servizio notifiche dev
-Sistema Notifiche,Development,App Server 2,notif-app-dev-02.internal,Application Server,Kotlin - push service dev
-Sistema Notifiche,Development,DB Server 1,notif-db-dev-01.internal,Database Server,PostgreSQL 16 - notifiche dev
-Sistema Notifiche,Development,DB Server 2,notif-db-dev-02.internal,Database Server,RabbitMQ - message queue dev
-Sistema Notifiche,Integration,App Server 1,notif-app-int-01.internal,Application Server,Kotlin - test notifiche
-Sistema Notifiche,Integration,DB Server 1,notif-db-int-01.internal,Database Server,PostgreSQL 16 - test integrazione
-Sistema Notifiche,Integration,DB Server 2,notif-db-int-02.internal,Database Server,RabbitMQ - test messaggi
-Sistema Notifiche,Pre-Produzione,App Server 1,notif-app-preprod-01.internal,Application Server,Kotlin - validazione pre-rilascio
-Sistema Notifiche,Pre-Produzione,DB Server 1,notif-db-preprod-01.internal,Database Server,PostgreSQL 16 - pre-produzione
-Sistema Notifiche,Pre-Produzione,DB Server 2,notif-db-preprod-02.internal,Database Server,RabbitMQ - pre-prod
-Sistema Notifiche,Produzione,App Server 1,notif-app-prod-01.internal,Application Server,Kotlin - notifiche push prod
-Sistema Notifiche,Produzione,App Server 2,notif-app-prod-02.internal,Application Server,Kotlin - notifiche email prod
-Sistema Notifiche,Produzione,App Server 3,notif-app-prod-03.internal,Application Server,Kotlin - notifiche SMS prod
-Sistema Notifiche,Produzione,DB Server 1,notif-db-prod-01.internal,Database Server,PostgreSQL 16 - notifiche prod
-Sistema Notifiche,Produzione,DB Server 2,notif-db-prod-02.internal,Database Server,PostgreSQL 16 - storico notifiche
-Sistema Notifiche,Produzione,DB Server 3,notif-db-prod-03.internal,Database Server,RabbitMQ - cluster messaggi prod
+application,environment,machine_name,hostname,instance_type,server_type,description
+Portale Clienti,Development,Web Server 1,web-dev-01.internal,t3.medium,Web Server,Frontend Apache - ambiente sviluppo
+Portale Clienti,Development,App Server 1,app-dev-01.internal,m6i.large,Application Server,Backend Tomcat - API REST
+Portale Clienti,Development,App Server 2,app-dev-02.internal,m6i.large,Application Server,Tomcat - servizi batch
+Portale Clienti,Development,DB Server 1,db-dev-01.internal,r6i.xlarge,Database Server,PostgreSQL 15 - database principale
+Portale Clienti,Integration,Web Server 1,web-int-01.internal,t3.large,Web Server,Nginx reverse proxy - test integrazione
+Portale Clienti,Integration,Web Server 2,web-int-02.internal,t3.large,Web Server,Nginx - test load balancing
+Portale Clienti,Integration,App Server 1,app-int-01.internal,m6i.xlarge,Application Server,Spring Boot - microservizi core
+Portale Clienti,Integration,App Server 2,app-int-02.internal,m6i.xlarge,Application Server,Spring Boot - microservizi auth
+Portale Clienti,Integration,App Server 3,app-int-03.internal,m6i.large,Application Server,Spring Boot - microservizi notifiche
+Portale Clienti,Integration,DB Server 1,db-int-01.internal,r6i.xlarge,Database Server,PostgreSQL 15 - replica integrazione
+Portale Clienti,Integration,DB Server 2,db-int-02.internal,r6i.large,Database Server,PostgreSQL 15 - test replica
+Portale Clienti,Bugfixing,Web Server 1,web-bug-01.internal,t3.medium,Web Server,Apache - ambiente bugfix
+Portale Clienti,Bugfixing,App Server 1,app-bug-01.internal,m6i.large,Application Server,Tomcat - riproduzione bug
+Portale Clienti,Bugfixing,DB Server 1,db-bug-01.internal,r6i.large,Database Server,PostgreSQL 15 - snapshot produzione
+Portale Clienti,Training,Web Server 1,web-train-01.internal,t3.small,Web Server,Apache - formazione utenti
+Portale Clienti,Training,App Server 1,app-train-01.internal,m6i.large,Application Server,Tomcat - demo applicativo
+Portale Clienti,Training,DB Server 1,db-train-01.internal,r6i.large,Database Server,PostgreSQL 15 - dati demo
+Portale Clienti,Pre-Produzione,Web Server 1,web-preprod-01.internal,m6i.large,Web Server,Apache - mirror produzione
+Portale Clienti,Pre-Produzione,Web Server 2,web-preprod-02.internal,m6i.large,Web Server,Nginx - test SSL termination
+Portale Clienti,Pre-Produzione,App Server 1,app-preprod-01.internal,m6i.2xlarge,Application Server,Tomcat - validazione release
+Portale Clienti,Pre-Produzione,App Server 2,app-preprod-02.internal,m6i.2xlarge,Application Server,Tomcat - test performance
+Portale Clienti,Pre-Produzione,DB Server 1,db-preprod-01.internal,r6i.2xlarge,Database Server,PostgreSQL 15 - dati anonimizzati
+Portale Clienti,Produzione,Web Server 1,web-prod-01.internal,m7a.xlarge,Web Server,Nginx LB - traffico primario
+Portale Clienti,Produzione,Web Server 2,web-prod-02.internal,m7a.xlarge,Web Server,Nginx LB - traffico secondario
+Portale Clienti,Produzione,Web Server 3,web-prod-03.internal,m7a.large,Web Server,Nginx - CDN origin
+Portale Clienti,Produzione,App Server 1,app-prod-01.internal,m7a.4xlarge,Application Server,Tomcat cluster - nodo primario
+Portale Clienti,Produzione,App Server 2,app-prod-02.internal,m7a.4xlarge,Application Server,Tomcat cluster - nodo secondario
+Portale Clienti,Produzione,App Server 3,app-prod-03.internal,m7a.4xlarge,Application Server,Tomcat cluster - nodo terziario
+Portale Clienti,Produzione,DB Server 1,db-prod-01.internal,r6i.4xlarge,Database Server,PostgreSQL 15 - master
+Portale Clienti,Produzione,DB Server 2,db-prod-02.internal,r6i.4xlarge,Database Server,PostgreSQL 15 - replica read-only
+Portale Clienti,Produzione,DB Server 3,db-prod-03.internal,r6i.2xlarge,Database Server,PostgreSQL 15 - replica DR
+CRM Aziendale,Development,Web Server 1,crm-web-dev-01.internal,t3.medium,Web Server,React frontend - dev server
+CRM Aziendale,Development,Web Server 2,crm-web-dev-02.internal,t3.small,Web Server,Storybook - component library
+CRM Aziendale,Development,App Server 1,crm-app-dev-01.internal,m6i.large,Application Server,Node.js Express - API sviluppo
+CRM Aziendale,Development,App Server 2,crm-app-dev-02.internal,m6i.large,Application Server,Node.js - worker processi async
+CRM Aziendale,Development,DB Server 1,crm-db-dev-01.internal,r6i.xlarge,Database Server,MongoDB 7 - database CRM dev
+CRM Aziendale,Development,DB Server 2,crm-db-dev-02.internal,r6g.large,Database Server,Redis 7 - cache e sessioni dev
+CRM Aziendale,Integration,Web Server 1,crm-web-int-01.internal,t3.large,Web Server,React build - test integration
+CRM Aziendale,Integration,App Server 1,crm-app-int-01.internal,m6i.xlarge,Application Server,Node.js - test end-to-end
+CRM Aziendale,Integration,App Server 2,crm-app-int-02.internal,m6i.xlarge,Application Server,Node.js - test performance
+CRM Aziendale,Integration,DB Server 1,crm-db-int-01.internal,r6i.xlarge,Database Server,MongoDB 7 - dati test
+CRM Aziendale,Integration,DB Server 2,crm-db-int-02.internal,r6g.large,Database Server,Redis 7 - cache integration
+CRM Aziendale,Bugfixing,Web Server 1,crm-web-bug-01.internal,t3.medium,Web Server,React - riproduzione bug UI
+CRM Aziendale,Bugfixing,App Server 1,crm-app-bug-01.internal,m6i.large,Application Server,Node.js - debug e hotfix
+CRM Aziendale,Bugfixing,DB Server 1,crm-db-bug-01.internal,r6i.large,Database Server,MongoDB 7 - snapshot per debug
+CRM Aziendale,Training,Web Server 1,crm-web-train-01.internal,t3.small,Web Server,React - ambiente formazione
+CRM Aziendale,Training,App Server 1,crm-app-train-01.internal,m6i.large,Application Server,Node.js - demo e training
+CRM Aziendale,Training,DB Server 1,crm-db-train-01.internal,r6i.large,Database Server,MongoDB 7 - dataset formazione
+CRM Aziendale,Pre-Produzione,Web Server 1,crm-web-preprod-01.internal,m6i.large,Web Server,React SSR - validazione pre-rilascio
+CRM Aziendale,Pre-Produzione,App Server 1,crm-app-preprod-01.internal,m6i.2xlarge,Application Server,Node.js - test accettazione
+CRM Aziendale,Pre-Produzione,App Server 2,crm-app-preprod-02.internal,m6i.2xlarge,Application Server,Node.js - test carico
+CRM Aziendale,Pre-Produzione,DB Server 1,crm-db-preprod-01.internal,r6i.2xlarge,Database Server,MongoDB 7 - dati pre-prod
+CRM Aziendale,Pre-Produzione,DB Server 2,crm-db-preprod-02.internal,r6g.xlarge,Database Server,Redis 7 - cache pre-prod
+CRM Aziendale,Produzione,Web Server 1,crm-web-prod-01.internal,m7a.xlarge,Web Server,React SSR - produzione
+CRM Aziendale,Produzione,Web Server 2,crm-web-prod-02.internal,m7a.xlarge,Web Server,React SSR - replica
+CRM Aziendale,Produzione,App Server 1,crm-app-prod-01.internal,m7a.4xlarge,Application Server,Node.js cluster - produzione
+CRM Aziendale,Produzione,App Server 2,crm-app-prod-02.internal,m7a.4xlarge,Application Server,Node.js cluster - replica
+CRM Aziendale,Produzione,DB Server 1,crm-db-prod-01.internal,r6i.4xlarge,Database Server,MongoDB 7 - replica set prod
+CRM Aziendale,Produzione,DB Server 2,crm-db-prod-02.internal,r6i.4xlarge,Database Server,MongoDB 7 - replica set secondary
+CRM Aziendale,Produzione,DB Server 3,crm-db-prod-03.internal,r6g.2xlarge,Database Server,Redis 7 - cache cluster prod
+ERP Finance,Development,Web Server 1,erp-web-dev-01.internal,t3.medium,Web Server,SAP Fiori - UI sviluppo
+ERP Finance,Development,App Server 1,erp-app-dev-01.internal,m6i.2xlarge,Application Server,SAP Netweaver - sviluppo ABAP
+ERP Finance,Development,App Server 2,erp-app-dev-02.internal,m6i.xlarge,Application Server,SAP PI - integrazione sviluppo
+ERP Finance,Development,DB Server 1,erp-db-dev-01.internal,r6i.2xlarge,Database Server,SQL Server 2022 - database ERP dev
+ERP Finance,Development,DB Server 2,erp-db-dev-02.internal,r6i.xlarge,Database Server,SQL Server 2022 - data warehouse dev
+ERP Finance,Integration,Web Server 1,erp-web-int-01.internal,t3.large,Web Server,SAP Fiori - test integrazione
+ERP Finance,Integration,App Server 1,erp-app-int-01.internal,m6i.2xlarge,Application Server,SAP Netweaver - test end-to-end
+ERP Finance,Integration,App Server 2,erp-app-int-02.internal,m6i.xlarge,Application Server,SAP PI - test flussi
+ERP Finance,Integration,DB Server 1,erp-db-int-01.internal,r6i.2xlarge,Database Server,SQL Server 2022 - integration test
+ERP Finance,Bugfixing,App Server 1,erp-app-bug-01.internal,m6i.xlarge,Application Server,SAP Netweaver - hotfix e patch
+ERP Finance,Bugfixing,App Server 2,erp-app-bug-02.internal,m6i.xlarge,Application Server,SAP PI - debug integrazioni
+ERP Finance,Bugfixing,DB Server 1,erp-db-bug-01.internal,r6i.xlarge,Database Server,SQL Server 2022 - repro bug
+ERP Finance,Training,Web Server 1,erp-web-train-01.internal,t3.medium,Web Server,SAP Fiori - formazione utenti
+ERP Finance,Training,App Server 1,erp-app-train-01.internal,m6i.xlarge,Application Server,SAP Netweaver - sandbox training
+ERP Finance,Training,DB Server 1,erp-db-train-01.internal,r6i.xlarge,Database Server,SQL Server 2022 - dati formazione
+ERP Finance,Pre-Produzione,Web Server 1,erp-web-preprod-01.internal,m6i.large,Web Server,SAP Fiori - UAT
+ERP Finance,Pre-Produzione,App Server 1,erp-app-preprod-01.internal,m6i.4xlarge,Application Server,SAP - UAT validazione utenti
+ERP Finance,Pre-Produzione,App Server 2,erp-app-preprod-02.internal,m6i.2xlarge,Application Server,SAP - batch processing test
+ERP Finance,Pre-Produzione,DB Server 1,erp-db-preprod-01.internal,r6i.4xlarge,Database Server,SQL Server 2022 - pre-release
+ERP Finance,Produzione,Web Server 1,erp-web-prod-01.internal,m7a.2xlarge,Web Server,SAP Fiori - portale produzione
+ERP Finance,Produzione,App Server 1,erp-app-prod-01.internal,x2idn.xlarge,Application Server,SAP Netweaver - produzione primario
+ERP Finance,Produzione,App Server 2,erp-app-prod-02.internal,x2idn.xlarge,Application Server,SAP Netweaver - produzione HA
+ERP Finance,Produzione,App Server 3,erp-app-prod-03.internal,m7a.4xlarge,Application Server,SAP PI - integrazione produzione
+ERP Finance,Produzione,DB Server 1,erp-db-prod-01.internal,r6i.8xlarge,Database Server,SQL Server 2022 - Always On primary
+ERP Finance,Produzione,DB Server 2,erp-db-prod-02.internal,r6i.8xlarge,Database Server,SQL Server 2022 - Always On secondary
+ERP Finance,Produzione,DB Server 3,erp-db-prod-03.internal,r6i.4xlarge,Database Server,SQL Server 2022 - data warehouse prod
+Data Analytics Platform,Development,Web Server 1,dap-web-dev-01.internal,t3.medium,Web Server,Grafana - dashboard sviluppo
+Data Analytics Platform,Development,App Server 1,dap-app-dev-01.internal,m6i.xlarge,Application Server,Python Flask - ETL pipeline dev
+Data Analytics Platform,Development,App Server 2,dap-app-dev-02.internal,m6i.2xlarge,Application Server,Jupyter Hub - notebook sviluppo
+Data Analytics Platform,Development,DB Server 1,dap-db-dev-01.internal,r6i.2xlarge,Database Server,ClickHouse - data warehouse dev
+Data Analytics Platform,Development,DB Server 2,dap-db-dev-02.internal,i3.xlarge,Database Server,MinIO - object storage dev
+Data Analytics Platform,Integration,Web Server 1,dap-web-int-01.internal,t3.large,Web Server,Grafana - test visualizzazioni
+Data Analytics Platform,Integration,App Server 1,dap-app-int-01.internal,m6i.2xlarge,Application Server,Python Flask - test pipeline
+Data Analytics Platform,Integration,App Server 2,dap-app-int-02.internal,m6i.4xlarge,Application Server,Spark - test job distribuiti
+Data Analytics Platform,Integration,DB Server 1,dap-db-int-01.internal,r6i.2xlarge,Database Server,ClickHouse - integration test
+Data Analytics Platform,Bugfixing,App Server 1,dap-app-bug-01.internal,m6i.xlarge,Application Server,Flask - debug pipeline
+Data Analytics Platform,Bugfixing,DB Server 1,dap-db-bug-01.internal,r6i.xlarge,Database Server,ClickHouse - repro issue dati
+Data Analytics Platform,Training,Web Server 1,dap-web-train-01.internal,t3.medium,Web Server,Grafana - formazione analisti
+Data Analytics Platform,Training,App Server 1,dap-app-train-01.internal,m6i.xlarge,Application Server,Jupyter Hub - training data science
+Data Analytics Platform,Training,DB Server 1,dap-db-train-01.internal,r6i.xlarge,Database Server,ClickHouse - dataset formazione
+Data Analytics Platform,Pre-Produzione,Web Server 1,dap-web-preprod-01.internal,m6i.large,Web Server,Grafana - validazione dashboard
+Data Analytics Platform,Pre-Produzione,App Server 1,dap-app-preprod-01.internal,m6i.4xlarge,Application Server,Airflow - test orchestrazione
+Data Analytics Platform,Pre-Produzione,DB Server 1,dap-db-preprod-01.internal,r6i.4xlarge,Database Server,ClickHouse - pre-produzione
+Data Analytics Platform,Produzione,Web Server 1,dap-web-prod-01.internal,m7a.xlarge,Web Server,Grafana HA - dashboard prod
+Data Analytics Platform,Produzione,Web Server 2,dap-web-prod-02.internal,m7a.xlarge,Web Server,Grafana HA - replica
+Data Analytics Platform,Produzione,App Server 1,dap-app-prod-01.internal,m7a.4xlarge,Application Server,Airflow - orchestrazione ETL
+Data Analytics Platform,Produzione,App Server 2,dap-app-prod-02.internal,m7a.8xlarge,Application Server,Spark cluster - elaborazione dati
+Data Analytics Platform,Produzione,DB Server 1,dap-db-prod-01.internal,r6i.8xlarge,Database Server,ClickHouse cluster - produzione
+Data Analytics Platform,Produzione,DB Server 2,dap-db-prod-02.internal,r6i.8xlarge,Database Server,ClickHouse cluster - replica
+Data Analytics Platform,Produzione,DB Server 3,dap-db-prod-03.internal,i3.4xlarge,Database Server,MinIO cluster - object storage prod
+Gestionale HR,Development,Web Server 1,hr-web-dev-01.internal,t3.medium,Web Server,Angular frontend - sviluppo
+Gestionale HR,Development,App Server 1,hr-app-dev-01.internal,m6i.large,Application Server,.NET 8 API - servizi HR dev
+Gestionale HR,Development,App Server 2,hr-app-dev-02.internal,m6i.large,Application Server,.NET 8 - worker servizi background
+Gestionale HR,Development,DB Server 1,hr-db-dev-01.internal,r6i.xlarge,Database Server,SQL Server 2022 - HR database dev
+Gestionale HR,Integration,Web Server 1,hr-web-int-01.internal,t3.large,Web Server,Angular - test integrazione
+Gestionale HR,Integration,App Server 1,hr-app-int-01.internal,m6i.xlarge,Application Server,.NET 8 - test API
+Gestionale HR,Integration,DB Server 1,hr-db-int-01.internal,r6i.xlarge,Database Server,SQL Server 2022 - integration test
+Gestionale HR,Bugfixing,Web Server 1,hr-web-bug-01.internal,t3.medium,Web Server,Angular - riproduzione bug
+Gestionale HR,Bugfixing,App Server 1,hr-app-bug-01.internal,m6i.large,Application Server,.NET 8 - hotfix
+Gestionale HR,Bugfixing,DB Server 1,hr-db-bug-01.internal,r6i.large,Database Server,SQL Server 2022 - debug
+Gestionale HR,Training,Web Server 1,hr-web-train-01.internal,t3.small,Web Server,Angular - formazione nuovi dipendenti
+Gestionale HR,Training,App Server 1,hr-app-train-01.internal,m6i.large,Application Server,.NET 8 - demo funzionalità
+Gestionale HR,Training,DB Server 1,hr-db-train-01.internal,r6i.large,Database Server,SQL Server 2022 - dati fittizi
+Gestionale HR,Pre-Produzione,Web Server 1,hr-web-preprod-01.internal,m6i.large,Web Server,Angular - validazione pre-rilascio
+Gestionale HR,Pre-Produzione,App Server 1,hr-app-preprod-01.internal,m6i.2xlarge,Application Server,.NET 8 - test accettazione
+Gestionale HR,Pre-Produzione,App Server 2,hr-app-preprod-02.internal,m6i.xlarge,Application Server,.NET 8 - test integrazione payroll
+Gestionale HR,Pre-Produzione,DB Server 1,hr-db-preprod-01.internal,r6i.2xlarge,Database Server,SQL Server 2022 - dati mascherati
+Gestionale HR,Produzione,Web Server 1,hr-web-prod-01.internal,m7a.xlarge,Web Server,Angular - portale dipendenti
+Gestionale HR,Produzione,Web Server 2,hr-web-prod-02.internal,m7a.xlarge,Web Server,Angular - portale manager
+Gestionale HR,Produzione,App Server 1,hr-app-prod-01.internal,m7a.2xlarge,Application Server,.NET 8 API - produzione
+Gestionale HR,Produzione,App Server 2,hr-app-prod-02.internal,m7a.2xlarge,Application Server,.NET 8 API - produzione HA
+Gestionale HR,Produzione,DB Server 1,hr-db-prod-01.internal,r6i.4xlarge,Database Server,SQL Server 2022 - HR produzione
+Gestionale HR,Produzione,DB Server 2,hr-db-prod-02.internal,r6i.4xlarge,Database Server,SQL Server 2022 - HR replica
+Piattaforma E-Commerce,Development,Web Server 1,ecom-web-dev-01.internal,t3.medium,Web Server,Next.js - frontend sviluppo
+Piattaforma E-Commerce,Development,Web Server 2,ecom-web-dev-02.internal,t3.small,Web Server,Storybook - design system
+Piattaforma E-Commerce,Development,App Server 1,ecom-app-dev-01.internal,m6i.large,Application Server,Go - API catalogo dev
+Piattaforma E-Commerce,Development,App Server 2,ecom-app-dev-02.internal,m6i.large,Application Server,Go - API ordini dev
+Piattaforma E-Commerce,Development,App Server 3,ecom-app-dev-03.internal,m6i.large,Application Server,Go - API pagamenti dev
+Piattaforma E-Commerce,Development,DB Server 1,ecom-db-dev-01.internal,r6i.xlarge,Database Server,PostgreSQL 16 - catalogo dev
+Piattaforma E-Commerce,Development,DB Server 2,ecom-db-dev-02.internal,r6g.large,Database Server,Redis 7 - cache carrello dev
+Piattaforma E-Commerce,Integration,Web Server 1,ecom-web-int-01.internal,t3.large,Web Server,Next.js - test E2E
+Piattaforma E-Commerce,Integration,App Server 1,ecom-app-int-01.internal,m6i.xlarge,Application Server,Go - API integration test
+Piattaforma E-Commerce,Integration,App Server 2,ecom-app-int-02.internal,m6i.xlarge,Application Server,Go - worker eventi int
+Piattaforma E-Commerce,Integration,DB Server 1,ecom-db-int-01.internal,r6i.xlarge,Database Server,PostgreSQL 16 - test integrazione
+Piattaforma E-Commerce,Integration,DB Server 2,ecom-db-int-02.internal,r6i.large,Database Server,Elasticsearch - ricerca prodotti int
+Piattaforma E-Commerce,Training,Web Server 1,ecom-web-train-01.internal,t3.small,Web Server,Next.js - demo e-commerce
+Piattaforma E-Commerce,Training,App Server 1,ecom-app-train-01.internal,m6i.large,Application Server,Go - API formazione
+Piattaforma E-Commerce,Training,DB Server 1,ecom-db-train-01.internal,r6i.large,Database Server,PostgreSQL 16 - catalogo demo
+Piattaforma E-Commerce,Pre-Produzione,Web Server 1,ecom-web-preprod-01.internal,m6i.large,Web Server,Next.js - UAT
+Piattaforma E-Commerce,Pre-Produzione,Web Server 2,ecom-web-preprod-02.internal,m6i.large,Web Server,Next.js - test performance
+Piattaforma E-Commerce,Pre-Produzione,App Server 1,ecom-app-preprod-01.internal,m6i.2xlarge,Application Server,Go - API pre-prod
+Piattaforma E-Commerce,Pre-Produzione,App Server 2,ecom-app-preprod-02.internal,m6i.xlarge,Application Server,Go - worker pre-prod
+Piattaforma E-Commerce,Pre-Produzione,DB Server 1,ecom-db-preprod-01.internal,r6i.2xlarge,Database Server,PostgreSQL 16 - pre-produzione
+Piattaforma E-Commerce,Pre-Produzione,DB Server 2,ecom-db-preprod-02.internal,r6g.xlarge,Database Server,Redis 7 - pre-prod cache
+Piattaforma E-Commerce,Pre-Produzione,DB Server 3,ecom-db-preprod-03.internal,r6i.xlarge,Database Server,Elasticsearch - pre-prod ricerca
+Piattaforma E-Commerce,Produzione,Web Server 1,ecom-web-prod-01.internal,m7a.2xlarge,Web Server,Next.js - frontend prod
+Piattaforma E-Commerce,Produzione,Web Server 2,ecom-web-prod-02.internal,m7a.2xlarge,Web Server,Next.js - frontend replica
+Piattaforma E-Commerce,Produzione,Web Server 3,ecom-web-prod-03.internal,m7a.xlarge,Web Server,Next.js - CDN origin
+Piattaforma E-Commerce,Produzione,App Server 1,ecom-app-prod-01.internal,m7a.4xlarge,Application Server,Go - API catalogo prod
+Piattaforma E-Commerce,Produzione,App Server 2,ecom-app-prod-02.internal,m7a.4xlarge,Application Server,Go - API ordini prod
+Piattaforma E-Commerce,Produzione,App Server 3,ecom-app-prod-03.internal,m7a.4xlarge,Application Server,Go - API pagamenti prod
+Piattaforma E-Commerce,Produzione,App Server 4,ecom-app-prod-04.internal,m7a.2xlarge,Application Server,Go - worker eventi prod
+Piattaforma E-Commerce,Produzione,DB Server 1,ecom-db-prod-01.internal,r6i.4xlarge,Database Server,PostgreSQL 16 - master prod
+Piattaforma E-Commerce,Produzione,DB Server 2,ecom-db-prod-02.internal,r6i.4xlarge,Database Server,PostgreSQL 16 - replica read
+Piattaforma E-Commerce,Produzione,DB Server 3,ecom-db-prod-03.internal,r6g.2xlarge,Database Server,Redis 7 - cluster cache prod
+Piattaforma E-Commerce,Produzione,DB Server 4,ecom-db-prod-04.internal,r6i.2xlarge,Database Server,Elasticsearch - ricerca prodotti prod
+Sistema Notifiche,Development,App Server 1,notif-app-dev-01.internal,m6i.large,Application Server,Kotlin - servizio notifiche dev
+Sistema Notifiche,Development,App Server 2,notif-app-dev-02.internal,m6i.large,Application Server,Kotlin - push service dev
+Sistema Notifiche,Development,DB Server 1,notif-db-dev-01.internal,r6i.large,Database Server,PostgreSQL 16 - notifiche dev
+Sistema Notifiche,Development,DB Server 2,notif-db-dev-02.internal,m6i.large,Database Server,RabbitMQ - message queue dev
+Sistema Notifiche,Integration,App Server 1,notif-app-int-01.internal,m6i.xlarge,Application Server,Kotlin - test notifiche
+Sistema Notifiche,Integration,DB Server 1,notif-db-int-01.internal,r6i.xlarge,Database Server,PostgreSQL 16 - test integrazione
+Sistema Notifiche,Integration,DB Server 2,notif-db-int-02.internal,m6i.large,Database Server,RabbitMQ - test messaggi
+Sistema Notifiche,Pre-Produzione,App Server 1,notif-app-preprod-01.internal,m6i.2xlarge,Application Server,Kotlin - validazione pre-rilascio
+Sistema Notifiche,Pre-Produzione,DB Server 1,notif-db-preprod-01.internal,r6i.2xlarge,Database Server,PostgreSQL 16 - pre-produzione
+Sistema Notifiche,Pre-Produzione,DB Server 2,notif-db-preprod-02.internal,m6i.xlarge,Database Server,RabbitMQ - pre-prod
+Sistema Notifiche,Produzione,App Server 1,notif-app-prod-01.internal,m7a.2xlarge,Application Server,Kotlin - notifiche push prod
+Sistema Notifiche,Produzione,App Server 2,notif-app-prod-02.internal,m7a.2xlarge,Application Server,Kotlin - notifiche email prod
+Sistema Notifiche,Produzione,App Server 3,notif-app-prod-03.internal,m7a.xlarge,Application Server,Kotlin - notifiche SMS prod
+Sistema Notifiche,Produzione,DB Server 1,notif-db-prod-01.internal,r6i.4xlarge,Database Server,PostgreSQL 16 - notifiche prod
+Sistema Notifiche,Produzione,DB Server 2,notif-db-prod-02.internal,r6i.2xlarge,Database Server,PostgreSQL 16 - storico notifiche
+Sistema Notifiche,Produzione,DB Server 3,notif-db-prod-03.internal,m7a.2xlarge,Database Server,RabbitMQ - cluster messaggi prod

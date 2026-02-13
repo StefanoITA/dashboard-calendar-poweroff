@@ -16,12 +16,36 @@
 const DynamoService = (() => {
     const CONFIG = {
         enabled: false,
-        endpoint: 'https://YOUR_API_GATEWAY.execute-api.eu-west-1.amazonaws.com/prod'
+        endpoint: 'https://YOUR_API_GATEWAY.execute-api.eu-west-1.amazonaws.com/prod',
+        retryAttempts: 4,
+        retryBaseDelay: 2000 // ms — exponential backoff: 2s, 4s, 8s, 16s
     };
 
     let initialSnapshot = {};
 
     function appEnvKey(app, env) { return `${app}_${env}`; }
+
+    // ============================================
+    // Retry Helper — exponential backoff
+    // ============================================
+    async function withRetry(fn, label = 'operation') {
+        let lastError;
+        for (let attempt = 0; attempt <= CONFIG.retryAttempts; attempt++) {
+            try {
+                return await fn();
+            } catch (err) {
+                lastError = err;
+                if (attempt < CONFIG.retryAttempts) {
+                    const delay = CONFIG.retryBaseDelay * Math.pow(2, attempt);
+                    console.warn(`[DynamoDB] ${label} failed (attempt ${attempt + 1}/${CONFIG.retryAttempts + 1}), retrying in ${delay}ms...`, err.message);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                } else {
+                    console.error(`[DynamoDB] ${label} failed after ${CONFIG.retryAttempts + 1} attempts`, err);
+                }
+            }
+        }
+        throw lastError;
+    }
 
     // Extract all schedules for one app+env from the global schedules object
     function extractAppEnvData(schedules, app, env) {
@@ -38,7 +62,6 @@ const DynamoService = (() => {
 
     // Merge DynamoDB data back into the global schedules format
     function mergeIntoSchedules(schedules, app, env, dynamoData) {
-        // dynamoData = { hostname: [entries], ... }
         if (!dynamoData) return;
         for (const [hostname, entries] of Object.entries(dynamoData)) {
             const key = `${app}|${env}|${hostname}`;
@@ -50,10 +73,10 @@ const DynamoService = (() => {
         }
     }
 
-    // Fetch schedules for multiple app_env keys
+    // Fetch schedules for multiple app_env keys (with retry)
     async function fetchAll(keys) {
         if (!CONFIG.enabled) return null;
-        try {
+        return withRetry(async () => {
             const response = await fetch(`${CONFIG.endpoint}/schedules/fetch`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -62,30 +85,29 @@ const DynamoService = (() => {
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data = await response.json();
             return data.items || {};
-        } catch (err) {
-            console.error('DynamoDB fetch failed:', err);
-            throw err;
-        }
+        }, 'fetchAll');
     }
 
-    // Save schedules for one app_env
+    // Save schedules for one app_env (with retry)
     async function saveOne(key, data, userId) {
         if (!CONFIG.enabled) return true;
-        const response = await fetch(`${CONFIG.endpoint}/schedules/save`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                key,
-                data,
-                user: userId,
-                timestamp: new Date().toISOString()
-            })
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return true;
+        return withRetry(async () => {
+            const response = await fetch(`${CONFIG.endpoint}/schedules/save`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    key,
+                    data,
+                    user: userId,
+                    timestamp: new Date().toISOString()
+                })
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return true;
+        }, `saveOne(${key})`);
     }
 
-    // Save multiple app_envs sequentially
+    // Save multiple app_envs sequentially (each with retry)
     async function saveMultiple(changes, userId) {
         const results = [];
         for (const { key, data } of changes) {
@@ -125,7 +147,6 @@ const DynamoService = (() => {
             const currData = extractAppEnvData(currentSchedules, app, env);
             const initData = extractAppEnvData(initialSnapshot, app, env);
             if (JSON.stringify(currData) !== JSON.stringify(initData)) {
-                // Count changes
                 const allHostnames = new Set([...Object.keys(currData), ...Object.keys(initData)]);
                 let added = 0, removed = 0, changed = 0;
                 allHostnames.forEach(h => {

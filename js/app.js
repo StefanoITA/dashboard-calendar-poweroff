@@ -334,7 +334,20 @@ const App = (() => {
         $('#clearSelection').addEventListener('click', () => { selectedDates.clear(); renderCalendar(); });
         $('#gcPrevMonth').addEventListener('click', () => navigateGeneralCalendar(-1));
         $('#gcNextMonth').addEventListener('click', () => navigateGeneralCalendar(1));
-        document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal(); closeEnvPopover(); } });
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') { closeModal(); closeEnvPopover(); }
+            if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                e.preventDefault();
+                handleSaveConfig();
+            }
+        });
+        window.addEventListener('beforeunload', (e) => {
+            const changes = DynamoService.getModifiedAppEnvs(DataManager.getSchedulesRef());
+            if (changes.length > 0) {
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        });
         document.addEventListener('click', e => {
             const popover = $('#envPopover');
             if (popover.style.display !== 'none' && !popover.contains(e.target) && !e.target.closest('#appList .nav-item')) {
@@ -1428,6 +1441,8 @@ const App = (() => {
         const allMachines = DataManager.getVMListMachines();
         const apps = [...new Set(allMachines.map(m => m.application))].sort();
         const envs = [...new Set(allMachines.map(m => m.environment))].sort();
+        let lastFiltered = allMachines;
+        const selectedRows = new Set();
 
         vmView.innerHTML = `
             <div class="vm-list-header">
@@ -1435,6 +1450,14 @@ const App = (() => {
                     <div>
                         <h2>Elenco VM</h2>
                         <div class="vm-list-subtitle">${allMachines.length} server totali</div>
+                    </div>
+                    <div class="vm-list-actions">
+                        <button class="btn-secondary vm-copy-btn" id="vmCopySelected" style="display:none">
+                            ${SVG.copy} Copia selezionati (<span id="vmSelectedCount">0</span>)
+                        </button>
+                        <button class="btn-secondary vm-copy-btn" id="vmCopyAll">
+                            ${SVG.copy} Copia elenco visibile
+                        </button>
                     </div>
                 </div>
             </div>
@@ -1453,9 +1476,9 @@ const App = (() => {
                         ${envs.map(e => `<option value="${e}">${e}</option>`).join('')}
                     </select>
                 </div>
-                <div class="vm-filter-group" style="flex:1;min-width:200px;">
+                <div class="vm-filter-group vm-filter-search-group">
                     <label class="vm-filter-label">Cerca</label>
-                    <input type="text" class="vm-filter-search" id="vmFilterSearch" placeholder="Cerca per nome, hostname...">
+                    <input type="text" class="vm-filter-search" id="vmFilterSearch" placeholder="Cerca per nome, hostname, instance type...">
                 </div>
                 <div class="vm-filter-group" style="align-self:flex-end;">
                     <span class="vm-filter-count" id="vmFilterCount">${allMachines.length} risultati</span>
@@ -1465,16 +1488,31 @@ const App = (() => {
                 <table class="vm-list-table">
                     <thead>
                         <tr>
+                            <th class="vm-th-check"><input type="checkbox" id="vmSelectAll" title="Seleziona tutti"></th>
                             <th>Nome Server</th>
                             <th>Hostname</th>
+                            <th class="vm-th-app">Applicazione</th>
+                            <th class="vm-th-env">Ambiente</th>
+                            <th>Instance Type</th>
                             <th>Tipo</th>
-                            <th>Applicazione</th>
-                            <th>Ambiente</th>
                         </tr>
                     </thead>
                     <tbody id="vmListBody"></tbody>
                 </table>
             </div>`;
+
+        const updateSelectedUI = () => {
+            const btn = vmView.querySelector('#vmCopySelected');
+            const count = vmView.querySelector('#vmSelectedCount');
+            if (selectedRows.size > 0) {
+                btn.style.display = 'inline-flex';
+                count.textContent = selectedRows.size;
+            } else {
+                btn.style.display = 'none';
+            }
+            const selectAll = vmView.querySelector('#vmSelectAll');
+            if (selectAll) selectAll.checked = lastFiltered.length > 0 && lastFiltered.every(m => selectedRows.has(m.hostname));
+        };
 
         const renderRows = () => {
             const filterApp = vmView.querySelector('#vmFilterApp').value;
@@ -1485,24 +1523,101 @@ const App = (() => {
             const filtered = allMachines.filter(m => {
                 if (filterApp && m.application !== filterApp) return false;
                 if (filterEnv && m.environment !== filterEnv) return false;
-                if (filterSearch && !`${m.machine_name} ${m.hostname} ${m.server_type} ${m.application} ${m.environment}`.toLowerCase().includes(filterSearch)) return false;
+                if (filterSearch && !`${m.machine_name} ${m.hostname} ${m.server_type} ${m.application} ${m.environment} ${m.instance_type || ''}`.toLowerCase().includes(filterSearch)) return false;
                 return true;
             });
+            lastFiltered = filtered;
 
             vmView.querySelector('#vmFilterCount').textContent = filtered.length + ' risultati';
 
             const typeColors = { 'Web Server': 'var(--info)', 'Application Server': 'var(--accent)', 'Database Server': 'var(--danger)' };
             tbody.innerHTML = filtered.map(m => {
                 const tc = typeColors[m.server_type] || 'var(--text-tertiary)';
-                return `<tr>
-                    <td class="vm-cell-name">${m.machine_name}</td>
-                    <td class="vm-cell-hostname"><code>${m.hostname}</code></td>
+                const checked = selectedRows.has(m.hostname) ? 'checked' : '';
+                return `<tr class="${checked ? 'vm-row-selected' : ''}" data-hostname="${m.hostname}">
+                    <td class="vm-td-check"><input type="checkbox" class="vm-row-check" data-hostname="${m.hostname}" ${checked}></td>
+                    <td class="vm-cell-name vm-cell-copyable" data-copy="${m.machine_name}" title="Clicca per copiare">${m.machine_name}</td>
+                    <td class="vm-cell-hostname vm-cell-copyable" data-copy="${m.hostname}" title="Clicca per copiare"><code>${m.hostname}</code></td>
+                    <td class="vm-cell-app">${m.application}</td>
+                    <td class="vm-cell-env"><span class="vm-env-badge">${m.environment}</span></td>
+                    <td class="vm-cell-instance"><code class="vm-instance-code">${m.instance_type || '-'}</code></td>
                     <td><span class="vm-type-badge" style="color:${tc};background:${tc}12;border-color:${tc}30">${m.server_type.replace(' Server', '')}</span></td>
-                    <td>${m.application}</td>
-                    <td><span class="vm-env-badge">${m.environment}</span></td>
                 </tr>`;
             }).join('');
+
+            // Copyable cells
+            tbody.querySelectorAll('.vm-cell-copyable').forEach(cell => {
+                cell.addEventListener('click', async () => {
+                    try {
+                        await navigator.clipboard.writeText(cell.dataset.copy);
+                        showToast('Copiato: ' + cell.dataset.copy, 'success');
+                    } catch { /* ignore */ }
+                });
+            });
+
+            // Row checkboxes
+            tbody.querySelectorAll('.vm-row-check').forEach(cb => {
+                cb.addEventListener('change', () => {
+                    if (cb.checked) selectedRows.add(cb.dataset.hostname);
+                    else selectedRows.delete(cb.dataset.hostname);
+                    cb.closest('tr').classList.toggle('vm-row-selected', cb.checked);
+                    updateSelectedUI();
+                });
+            });
+
+            updateSelectedUI();
         };
+
+        const formatMachinesTable = (machines) => {
+            const pad = (s, n) => (s || '').padEnd(n);
+            const cols = [
+                { key: 'machine_name', label: 'Nome Server', width: 20 },
+                { key: 'hostname', label: 'Hostname', width: 30 },
+                { key: 'application', label: 'Applicazione', width: 26 },
+                { key: 'environment', label: 'Ambiente', width: 16 },
+                { key: 'instance_type', label: 'Instance Type', width: 16 },
+                { key: 'server_type', label: 'Tipo', width: 20 }
+            ];
+            // Auto-calculate widths
+            cols.forEach(c => {
+                c.width = Math.max(c.label.length, ...machines.map(m => (m[c.key] || '-').length)) + 2;
+            });
+            const header = cols.map(c => pad(c.label, c.width)).join(' | ');
+            const sep = cols.map(c => '-'.repeat(c.width)).join('-+-');
+            const rows = machines.map(m => cols.map(c => pad(m[c.key] || '-', c.width)).join(' | '));
+            return [header, sep, ...rows].join('\n');
+        };
+
+        // Copy all visible
+        vmView.querySelector('#vmCopyAll').addEventListener('click', async () => {
+            if (lastFiltered.length === 0) { showToast('Nessun server da copiare', 'info'); return; }
+            try {
+                const text = formatMachinesTable(lastFiltered);
+                await navigator.clipboard.writeText(text);
+                showToast(`${lastFiltered.length} server copiati negli appunti`, 'success');
+            } catch { showToast('Errore nella copia', 'error'); }
+        });
+
+        // Copy selected
+        vmView.querySelector('#vmCopySelected').addEventListener('click', async () => {
+            const selected = lastFiltered.filter(m => selectedRows.has(m.hostname));
+            if (selected.length === 0) { showToast('Nessun server selezionato', 'info'); return; }
+            try {
+                const text = formatMachinesTable(selected);
+                await navigator.clipboard.writeText(text);
+                showToast(`${selected.length} server copiati negli appunti`, 'success');
+            } catch { showToast('Errore nella copia', 'error'); }
+        });
+
+        // Select all checkbox
+        vmView.querySelector('#vmSelectAll').addEventListener('change', (e) => {
+            if (e.target.checked) {
+                lastFiltered.forEach(m => selectedRows.add(m.hostname));
+            } else {
+                lastFiltered.forEach(m => selectedRows.delete(m.hostname));
+            }
+            renderRows();
+        });
 
         renderRows();
         vmView.querySelector('#vmFilterApp').addEventListener('change', renderRows);
@@ -1584,13 +1699,20 @@ const App = (() => {
         const changes = DynamoService.getModifiedAppEnvs(DataManager.getSchedulesRef());
         const badge = $('#changesBadge');
         const saveBtn = $('#saveConfigBtn');
+        const reminder = document.getElementById('saveReminder');
         if (changes.length > 0) {
             badge.textContent = changes.length;
             badge.style.display = 'flex';
             saveBtn.classList.add('has-changes');
+            saveBtn.classList.remove('no-changes');
+            saveBtn.disabled = false;
+            if (reminder) reminder.style.display = 'block';
         } else {
             badge.style.display = 'none';
             saveBtn.classList.remove('has-changes');
+            saveBtn.classList.add('no-changes');
+            saveBtn.disabled = true;
+            if (reminder) reminder.style.display = 'none';
         }
     }
 
