@@ -10,19 +10,41 @@
       "id": "luca.bianchi",
       "name": "Luca Bianchi",
       "role": "Application_owner",
-      "applications": ["Portale Clienti", "CRM Aziendale"]
+      "applications": {
+        "Portale Clienti": "rw",
+        "CRM Aziendale": "rw",
+        "Gestionale HR": "ro"
+      }
     },
     {
       "id": "anna.verdi",
       "name": "Anna Verdi",
       "role": "Application_owner",
-      "applications": ["ERP Finance", "Data Analytics Platform"]
+      "applications": {
+        "ERP Finance": "rw",
+        "Data Analytics Platform": "rw",
+        "Gestionale HR": "ro",
+        "CRM Aziendale": "ro"
+      }
     },
     {
       "id": "paolo.neri",
       "name": "Paolo Neri",
       "role": "Application_owner",
-      "applications": ["Gestionale HR"]
+      "applications": {
+        "Gestionale HR": "rw",
+        "ERP Finance": "ro"
+      }
+    },
+    {
+      "id": "giulia.martini",
+      "name": "Giulia Martini",
+      "role": "Application_owner",
+      "applications": {
+        "Piattaforma E-Commerce": "rw",
+        "Sistema Notifiche": "rw",
+        "Portale Clienti": "ro"
+      }
     },
     {
       "id": "viewer",
