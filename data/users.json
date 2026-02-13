@@ -1,0 +1,34 @@
+{
+  "users": [
+    {
+      "id": "mario.rossi",
+      "name": "Mario Rossi",
+      "role": "Admin",
+      "applications": ["*"]
+    },
+    {
+      "id": "luca.bianchi",
+      "name": "Luca Bianchi",
+      "role": "Application_owner",
+      "applications": ["Portale Clienti", "CRM Aziendale"]
+    },
+    {
+      "id": "anna.verdi",
+      "name": "Anna Verdi",
+      "role": "Application_owner",
+      "applications": ["ERP Finance", "Data Analytics Platform"]
+    },
+    {
+      "id": "paolo.neri",
+      "name": "Paolo Neri",
+      "role": "Application_owner",
+      "applications": ["Gestionale HR"]
+    },
+    {
+      "id": "viewer",
+      "name": "Visualizzatore",
+      "role": "Read-Only",
+      "applications": ["*"]
+    }
+  ]
+}
