@@ -3,21 +3,42 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Dashboard per la pianificazione e il coordinamento degli shutdown e delle accensioni degli ambienti applicativi aziendali">
+    <meta name="description" content="FinOps Platform — Pianificazione e coordinamento degli shutdown e delle accensioni degli ambienti applicativi aziendali">
     <meta name="theme-color" content="#c2410c">
-    <title>Shutdown Scheduler</title>
+    <title>FinOps Platform</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
+    <style>
+        /* Preloader — visible before main CSS/JS load */
+        .preloader {
+            position: fixed; inset: 0; z-index: 99999;
+            background: #f8f9fb; display: flex; align-items: center; justify-content: center;
+        }
+        [data-theme="dark"] .preloader { background: #0a0a0f; }
+        .preloader-spinner {
+            width: 36px; height: 36px; border: 3px solid #e4e6ed;
+            border-top-color: #c2410c; border-radius: 50%;
+            animation: preloaderSpin 0.7s linear infinite;
+        }
+        [data-theme="dark"] .preloader-spinner { border-color: #252538; border-top-color: #ea580c; }
+        @keyframes preloaderSpin { to { transform: rotate(360deg); } }
+        .preloader.hidden { opacity: 0; pointer-events: none; transition: opacity 0.3s ease; }
+    </style>
 </head>
 <body>
+    <!-- ========== Preloader ========== -->
+    <div class="preloader" id="preloader">
+        <div class="preloader-spinner"></div>
+    </div>
+
     <!-- ========== Sidebar ========== -->
     <aside class="sidebar">
         <div class="sidebar-header">
             <div class="logo">
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                Shutdown Scheduler
+                FinOps Platform
             </div>
         </div>
 
@@ -92,7 +113,7 @@
             <div class="welcome-icon">
                 <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
             </div>
-            <h1>Shutdown Scheduler</h1>
+            <h1>FinOps Platform</h1>
             <p>Seleziona un'applicazione dalla barra laterale per gestire le pianificazioni di spegnimento e accensione dei server.</p>
             <div class="welcome-stats" id="welcomeStats"></div>
         </div>
@@ -119,11 +140,20 @@
         <!-- VM List View -->
         <div class="vm-list-view" id="vmListView" style="display:none"></div>
 
+        <!-- EBS Disk List View -->
+        <div class="vm-list-view" id="ebsListView" style="display:none"></div>
+
         <!-- General Calendar View -->
         <div class="general-calendar-view" id="generalCalendarView" style="display:none">
             <div class="gc-header">
-                <h2>Calendario Generale</h2>
-                <div class="gc-subtitle">Panoramica di tutte le pianificazioni per mese</div>
+                <div>
+                    <h2>Calendario Generale</h2>
+                    <div class="gc-subtitle">Panoramica di tutte le pianificazioni per mese</div>
+                </div>
+                <button class="btn-secondary" id="gcExportPdfBtn" style="font-size:0.8rem;padding:7px 14px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                    Esporta PDF
+                </button>
             </div>
             <div class="gc-filters" id="gcFilters"></div>
             <div class="gc-nav">
@@ -252,10 +282,22 @@
     <!-- ========== Toast Container ========== -->
     <div class="toast-container" id="toastContainer"></div>
 
-    <!-- ========== Scripts ========== -->
-    <script src="js/audit.js"></script>
-    <script src="js/dynamo.js"></script>
-    <script src="js/data.js"></script>
-    <script src="js/app.js"></script>
+    <!-- ========== Scripts (cache-busted) ========== -->
+    <script>
+        // Cache-busting: sequential loading to maintain dependency order
+        (function() {
+            var v = Date.now();
+            var scripts = ['js/audit.js','js/dynamo.js','js/data.js','js/app.js'];
+            var i = 0;
+            function loadNext() {
+                if (i >= scripts.length) return;
+                var s = document.createElement('script');
+                s.src = scripts[i] + '?v=' + v;
+                s.onload = function() { i++; loadNext(); };
+                document.body.appendChild(s);
+            }
+            loadNext();
+        })();
+    </script>
 </body>
 </html>

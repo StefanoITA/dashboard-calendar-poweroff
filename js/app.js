@@ -1,5 +1,5 @@
 /* ============================================
-   Shutdown Scheduler — Main Application
+   FinOps Platform — Main Application
    ============================================ */
 const App = (() => {
     let currentApp = null;
@@ -31,10 +31,10 @@ const App = (() => {
         'Database Server': '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>'
     };
 
-    const envClassMap = { 'Development':'dev','Integration':'int','Pre-Produzione':'preprod','Training':'training','Bugfixing':'bugfix','Produzione':'prod' };
+    const envClassMap = { 'Development':'dev','Integration':'int','Pre-Produzione':'preprod','Training':'training','Bugfixing':'bugfix','Produzione':'prod','Pre-Production':'preprod','Production':'prod' };
     const appColors = ['#c2410c','#7c3aed','#2563eb','#0891b2','#059669','#dc2626','#db2777','#4f46e5','#ca8a04'];
     const recurringLabels = { 'none':'Giorni specifici','daily':'Ogni giorno','weekdays':'Lun-Ven','weekends':'Sab-Dom' };
-    const envColors = { 'Development':'#2563eb','Integration':'#7c3aed','Bugfixing':'#dc2626','Training':'#0891b2','Pre-Produzione':'#d97706','Produzione':'#059669' };
+    const envColors = { 'Development':'#2563eb','Integration':'#7c3aed','Bugfixing':'#dc2626','Training':'#0891b2','Pre-Produzione':'#d97706','Produzione':'#059669','Pre-Production':'#d97706','Production':'#059669' };
 
     const SVG = {
         check: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
@@ -90,6 +90,11 @@ const App = (() => {
         localStorage.removeItem(SSO_TOKEN_KEY);
     }
 
+    function hidePreloader() {
+        const el = document.getElementById('preloader');
+        if (el) { el.classList.add('hidden'); setTimeout(() => el.remove(), 400); }
+    }
+
     function showGitHubLinkScreen() {
         const overlay = document.createElement('div');
         overlay.className = 'unauthorized-overlay';
@@ -115,7 +120,7 @@ const App = (() => {
     // ============================================
     // Confirm Dialog (Promise-based)
     // ============================================
-    function confirmDialog({ title, message, confirmLabel = 'Elimina', iconType = 'danger', confirmClass = 'btn-danger', wide = false }) {
+    function confirmDialog({ title, message, confirmLabel = 'Elimina', iconType = 'danger', confirmClass = 'btn-danger', wide = false, onMount = null }) {
         return new Promise(resolve => {
             const overlay = document.createElement('div');
             overlay.className = 'confirm-overlay';
@@ -140,6 +145,7 @@ const App = (() => {
             overlay.querySelector('.confirm-ok').addEventListener('click', () => close(true));
             overlay.addEventListener('click', e => { if (e.target === overlay) close(false); });
             overlay.querySelector('.confirm-cancel').focus();
+            if (onMount) onMount(overlay);
         });
     }
 
@@ -292,6 +298,10 @@ const App = (() => {
         await DataManager.loadMessages();
         await DataManager.loadFromPath('data/machines.csv');
 
+        // Load EBS disks from localStorage
+        try { const saved = localStorage.getItem('finops_ebsDisks'); if (saved) ebsDisks = JSON.parse(saved); } catch {}
+
+
         const users = DataManager.getUsers();
 
         // SSO Authentication via OAuth + Token HMAC
@@ -343,6 +353,7 @@ const App = (() => {
             // 3. No valid session → show "Collega GitHub Enterprise" screen
             if (!ghUsername) {
                 showGitHubLinkScreen();
+                hidePreloader();
                 return;
             }
 
@@ -356,6 +367,7 @@ const App = (() => {
             } else {
                 clearSSOSession();
                 showUnauthorizedScreen(ghUsername);
+                hidePreloader();
                 return;
             }
         } else {
@@ -365,6 +377,7 @@ const App = (() => {
 
             if (savedUserId && !matchedUser) {
                 showUnauthorizedScreen(savedUserId);
+                hidePreloader();
                 return;
             }
 
@@ -389,10 +402,12 @@ const App = (() => {
 
         renderAppList();
         renderVMListButton();
+        renderEBSListButton();
         renderHomeDashboard();
         initTimePickers();
         bindEvents();
         updateChangesBadge();
+        hidePreloader();
     }
 
     // ============================================
@@ -428,7 +443,7 @@ const App = (() => {
                 <p class="unauthorized-sub">${sub}</p>
                 <div class="unauthorized-actions">${actions}</div>
                 <div class="unauthorized-contact">
-                    <span>Amministratore: mario.rossi@company.it</span>
+                    <span>Contattare il FinOps Team per assistenza</span>
                 </div>
             </div>`;
         document.body.appendChild(overlay);
@@ -486,6 +501,7 @@ const App = (() => {
         $('#clearSelection').addEventListener('click', () => { selectedDates.clear(); renderCalendar(); });
         $('#gcPrevMonth').addEventListener('click', () => navigateGeneralCalendar(-1));
         $('#gcNextMonth').addEventListener('click', () => navigateGeneralCalendar(1));
+        $('#gcExportPdfBtn').addEventListener('click', exportGCToPdf);
         document.addEventListener('keydown', e => {
             if (e.key === 'Escape') { closeModal(); closeEnvPopover(); }
             if ((e.ctrlKey || e.metaKey) && e.key === 's') {
@@ -551,7 +567,24 @@ const App = (() => {
                         ${roleIcon}
                         <span>${roleLabel}</span>
                     </div>
-                </div>`;
+                </div>
+                <button class="btn-logout" id="logoutBtn">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                    Logout
+                </button>`;
+            $('#logoutBtn').addEventListener('click', async () => {
+                const confirmed = await confirmDialog({
+                    title: 'Conferma Logout',
+                    message: 'Vuoi disconnetterti dalla piattaforma?',
+                    confirmLabel: 'Logout',
+                    iconType: 'warning',
+                    confirmClass: 'btn-primary'
+                });
+                if (!confirmed) return;
+                clearSSOSession();
+                localStorage.removeItem('shutdownScheduler_userId');
+                location.reload();
+            });
         } else {
             // Local dev mode: show dropdown selector
             let optionsHtml = users.map(u => `<option value="${u.id}" ${current && current.id === u.id ? 'selected' : ''}>${u.name}</option>`).join('');
@@ -625,12 +658,16 @@ const App = (() => {
         $('#generalCalendarView').style.display = view === 'general-calendar' ? 'block' : 'none';
         const vmView = document.getElementById('vmListView');
         if (vmView) vmView.style.display = view === 'vm-list' ? 'block' : 'none';
+        const ebsView = document.getElementById('ebsListView');
+        if (ebsView) ebsView.style.display = view === 'ebs-list' ? 'block' : 'none';
         $('#exportBtn').style.display = (view === 'machines' || view === 'general-calendar') ? 'inline-flex' : 'none';
         // Update sidebar active states
         $('#homeBtn').classList.toggle('active', view === 'home');
         $('#generalCalendarBtn').classList.toggle('active', view === 'general-calendar');
         const vmBtn = document.getElementById('vmListBtn');
         if (vmBtn) vmBtn.classList.toggle('active', view === 'vm-list');
+        const ebsBtn = document.getElementById('ebsListBtn');
+        if (ebsBtn) ebsBtn.classList.toggle('active', view === 'ebs-list');
     }
 
     function updateCalendarVisibility() {
@@ -711,8 +748,21 @@ const App = (() => {
         const btn = document.createElement('button');
         btn.className = 'sidebar-action-btn';
         btn.id = 'vmListBtn';
-        btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg> Elenco VM`;
+        btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg> Elenco VM`;
         btn.addEventListener('click', showVMList);
+        navActions.appendChild(btn);
+    }
+
+    function renderEBSListButton() {
+        const old = document.getElementById('ebsListBtn');
+        if (old) old.remove();
+        if (!DataManager.canViewVMList()) return;
+        const navActions = document.querySelector('.sidebar-nav-actions');
+        const btn = document.createElement('button');
+        btn.className = 'sidebar-action-btn';
+        btn.id = 'ebsListBtn';
+        btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg> Elenco Dischi AWS`;
+        btn.addEventListener('click', showEBSList);
         navActions.appendChild(btn);
     }
 
@@ -943,6 +993,7 @@ const App = (() => {
                             <div class="env-group-detail">${recLabel} &middot; ${g.hostnames.length}/${g.totalMachines} server${excluded > 0 ? ` (${excluded} esclusi)` : ''}</div>
                         </div>
                         ${!readOnly ? `<div class="env-group-actions">
+                            ${excluded > 0 ? `<button class="btn-secondary env-group-reinclude-btn" data-group-id="${g.groupId}" style="padding:6px 12px;font-size:0.78rem;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg> Re-includi (${excluded})</button>` : ''}
                             <button class="btn-secondary env-group-edit-btn" data-group-id="${g.groupId}" style="padding:6px 12px;font-size:0.78rem;">${SVG.edit} Modifica</button>
                             <button class="btn-entry-action delete-entry-btn env-group-delete-btn" data-group-id="${g.groupId}" title="Elimina schedulazione ambiente">
                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
@@ -951,6 +1002,28 @@ const App = (() => {
                     </div>`;
                 }).join('');
             grid.parentNode.insertBefore(envGroupsContainer, grid);
+
+            // Re-include excluded VMs
+            envGroupsContainer.querySelectorAll('.env-group-reinclude-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const gid = btn.dataset.groupId;
+                    const group = envGroups.find(g => g.groupId === gid);
+                    if (!group) return;
+                    const confirmed = await confirmDialog({
+                        title: 'Re-includere server esclusi?',
+                        message: `Vuoi re-includere nella schedulazione ambiente i <strong>${group.totalMachines - group.hostnames.length}</strong> server precedentemente esclusi?`,
+                        confirmLabel: 'Re-includi',
+                        iconType: 'accent',
+                        confirmClass: 'btn-primary'
+                    });
+                    if (!confirmed) return;
+                    DataManager.reincludeInEnvGroup(appName, envName, gid);
+                    AuditLog.log('Re-inclusi server in schedulazione ambiente', `${appName} / ${envName}`);
+                    renderMachines(currentApp, currentEnv);
+                    updateChangesBadge();
+                    showToast('Server re-inclusi nella schedulazione ambiente', 'success');
+                });
+            });
 
             // Env group event handlers
             envGroupsContainer.querySelectorAll('.env-group-edit-btn').forEach(btn => {
@@ -980,7 +1053,36 @@ const App = (() => {
             });
         }
 
+        // Group machines by server type
+        const typeOrder = ['Web Server', 'Application Server', 'Database Server'];
+        const groupedMachines = {};
         machines.forEach(m => {
+            const t = m.server_type || 'Application Server';
+            if (!groupedMachines[t]) groupedMachines[t] = [];
+            groupedMachines[t].push(m);
+        });
+        const typeLabels = { 'Web Server': 'Web Server', 'Application Server': 'Application Server', 'Database Server': 'Database Server' };
+        const typeIcons = { 'Web Server': 'web', 'Application Server': 'app', 'Database Server': 'db' };
+
+        const sortedTypes = typeOrder.filter(t => groupedMachines[t]);
+        // Add any types not in the predefined order
+        Object.keys(groupedMachines).forEach(t => { if (!sortedTypes.includes(t)) sortedTypes.push(t); });
+
+        sortedTypes.forEach(serverType => {
+            const groupMachines = groupedMachines[serverType];
+            const groupHeader = document.createElement('div');
+            groupHeader.className = 'machine-group-header';
+            const tIcon = typeIcons[serverType] || 'app';
+            groupHeader.innerHTML = `<span class="machine-group-icon ${tIcon}">${serverIcons[serverType] || serverIcons['Application Server']}</span><span class="machine-group-label">${typeLabels[serverType] || serverType}</span><span class="machine-group-count">${groupMachines.length}</span>`;
+            grid.appendChild(groupHeader);
+
+            groupMachines.forEach(m => {
+                renderMachineCard(m, appName, envName, readOnly, grid);
+            });
+        });
+    }
+
+    function renderMachineCard(m, appName, envName, readOnly, grid) {
             const entries = DataManager.getScheduleEntries(appName, envName, m.hostname);
             const notesArr = DataManager.getNotes(m.hostname);
             const typeClass = m.server_type.includes('Web') ? 'web' : m.server_type.includes('Application') ? 'app' : 'db';
@@ -1092,7 +1194,6 @@ const App = (() => {
             }));
 
             grid.appendChild(card);
-        });
     }
 
     function filterMachines(query) {
@@ -1452,9 +1553,9 @@ const App = (() => {
         const container = $('#gcFilters');
         container.innerHTML = '';
 
-        // App filters row
+        // App filters row with search
         const appRow = document.createElement('div');
-        appRow.className = 'gc-filter-row';
+        appRow.className = 'gc-filter-row gc-filter-row-searchable';
         appRow.innerHTML = '<span class="gc-filters-label">Applicazioni</span>';
 
         const allAppActive = gcActiveFilters.size === apps.length;
@@ -1468,6 +1569,21 @@ const App = (() => {
             renderGeneralCalendar();
         });
         appRow.appendChild(toggleAll);
+
+        // Search input for apps
+        if (apps.length > 8) {
+            const searchInput = document.createElement('input');
+            searchInput.type = 'text';
+            searchInput.className = 'gc-filter-search-inline';
+            searchInput.placeholder = 'Cerca app...';
+            searchInput.addEventListener('input', () => {
+                const q = searchInput.value.toLowerCase();
+                appRow.querySelectorAll('.gc-filter-chip').forEach(chip => {
+                    chip.style.display = !q || chip.textContent.toLowerCase().includes(q) ? '' : 'none';
+                });
+            });
+            appRow.appendChild(searchInput);
+        }
 
         apps.forEach((app, i) => {
             const color = appColors[i % appColors.length];
@@ -1604,6 +1720,101 @@ const App = (() => {
     }
 
     // ============================================
+    // PDF Export — General Calendar
+    // ============================================
+    function exportGCToPdf() {
+        const year = gcDate.getFullYear(), month = gcDate.getMonth();
+        const monthName = monthNames[month];
+
+        // Build schedule data for each day
+        const allSchedules = DataManager.getAllSchedulesFlat().filter(s => gcActiveFilters.has(s.app) && gcActiveEnvFilters.has(s.env));
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        const dateMap = {};
+        for (let d = 1; d <= daysInMonth; d++) {
+            dateMap[`${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`] = new Map();
+        }
+
+        const dowForDate = ds => new Date(ds + 'T00:00:00').getDay();
+        allSchedules.forEach(({ app, env, entry }) => {
+            const key = `${app} - ${env}`;
+            const addToDate = ds => { if (dateMap[ds]) dateMap[ds].set(key, (dateMap[ds].get(key)||0) + 1); };
+            if (entry.recurring === 'daily') {
+                for (let d = 1; d <= daysInMonth; d++) addToDate(`${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+            } else if (entry.recurring === 'weekdays') {
+                for (let d = 1; d <= daysInMonth; d++) { const ds = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const dw = dowForDate(ds); if (dw >= 1 && dw <= 5) addToDate(ds); }
+            } else if (entry.recurring === 'weekends') {
+                for (let d = 1; d <= daysInMonth; d++) { const ds = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const dw = dowForDate(ds); if (dw === 0 || dw === 6) addToDate(ds); }
+            } else if (entry.dates) {
+                entry.dates.forEach(ds => addToDate(ds));
+            }
+        });
+
+        const dayNames = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
+
+        // Build HTML for print
+        let html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>FinOps Platform - ${monthName} ${year}</title>
+        <style>
+            @page { size: A4 landscape; margin: 15mm; }
+            body { font-family: Arial, sans-serif; font-size: 10px; color: #333; margin: 0; padding: 0; }
+            .header { text-align: center; margin-bottom: 12px; border-bottom: 2px solid #c2410c; padding-bottom: 8px; }
+            .header h1 { font-size: 18px; margin: 0; color: #c2410c; }
+            .header p { font-size: 11px; color: #666; margin: 4px 0 0; }
+            table { width: 100%; border-collapse: collapse; }
+            th { background: #f2f2f2; padding: 6px 4px; border: 1px solid #ccc; font-size: 9px; text-transform: uppercase; }
+            td { padding: 4px; border: 1px solid #ddd; vertical-align: top; min-height: 50px; width: 14.28%; }
+            .day-num { font-weight: bold; font-size: 11px; margin-bottom: 2px; }
+            .day-weekend { background: #fafafa; }
+            .tag { display: inline-block; font-size: 7px; padding: 1px 3px; border-radius: 2px; margin: 1px 0; background: #e8f0fe; color: #1a56db; white-space: nowrap; }
+            .footer { text-align: center; font-size: 8px; color: #999; margin-top: 8px; }
+            .empty { background: #f9f9f9; }
+        </style></head><body>
+        <div class="header">
+            <h1>FinOps Platform &mdash; Calendario Generale</h1>
+            <p>${monthName} ${year} &bull; Generato il ${new Date().toLocaleDateString('it-IT')}</p>
+        </div>
+        <table>
+            <thead><tr><th>Luned&igrave;</th><th>Marted&igrave;</th><th>Mercoled&igrave;</th><th>Gioved&igrave;</th><th>Venerd&igrave;</th><th>Sabato</th><th>Domenica</th></tr></thead>
+            <tbody>`;
+
+        let startDow = new Date(year, month, 1).getDay();
+        startDow = startDow === 0 ? 6 : startDow - 1;
+
+        let dayCounter = 1;
+        const totalCells = Math.ceil((startDow + daysInMonth) / 7) * 7;
+
+        for (let i = 0; i < totalCells; i++) {
+            if (i % 7 === 0) html += '<tr>';
+            if (i < startDow || dayCounter > daysInMonth) {
+                html += '<td class="empty"></td>';
+            } else {
+                const ds = `${year}-${String(month+1).padStart(2,'0')}-${String(dayCounter).padStart(2,'0')}`;
+                const date = new Date(year, month, dayCounter);
+                const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+                const entries = dateMap[ds] || new Map();
+                let tagsHtml = '';
+                entries.forEach((count, key) => {
+                    tagsHtml += `<div class="tag">${key} (${count})</div>`;
+                });
+                html += `<td class="${isWeekend ? 'day-weekend' : ''}"><div class="day-num">${dayCounter} ${dayNames[date.getDay()]}</div>${tagsHtml}</td>`;
+                dayCounter++;
+            }
+            if (i % 7 === 6) html += '</tr>';
+        }
+
+        html += '</tbody></table>';
+        html += `<div class="footer">FinOps Platform &bull; ${monthName} ${year}</div>`;
+        html += '</body></html>';
+
+        // Open in new window and trigger print (generates PDF)
+        const printWindow = window.open('', '_blank');
+        printWindow.document.write(html);
+        printWindow.document.close();
+        printWindow.onload = () => { printWindow.print(); };
+        AuditLog.log('Esportazione PDF', `Calendario Generale — ${monthName} ${year}`);
+        showToast('PDF in fase di generazione...', 'info');
+    }
+
+    // ============================================
     // VM List View
     // ============================================
     function showVMList() {
@@ -1687,6 +1898,21 @@ const App = (() => {
             const envContainer = vmView.querySelector('#vmEnvChips');
             appContainer.innerHTML = '';
             envContainer.innerHTML = '';
+
+            // Search input for apps if many
+            if (apps.length > 8) {
+                const searchInput = document.createElement('input');
+                searchInput.type = 'text';
+                searchInput.className = 'gc-filter-search-inline';
+                searchInput.placeholder = 'Cerca app...';
+                searchInput.addEventListener('input', () => {
+                    const q = searchInput.value.toLowerCase();
+                    appContainer.querySelectorAll('.gc-filter-chip').forEach(chip => {
+                        chip.style.display = !q || chip.textContent.toLowerCase().includes(q) ? '' : 'none';
+                    });
+                });
+                appContainer.appendChild(searchInput);
+            }
 
             apps.forEach((a, i) => {
                 const color = appColors[i % appColors.length];
@@ -1800,44 +2026,60 @@ const App = (() => {
             updateSelectedUI();
         };
 
-        const formatMachinesTable = (machines) => {
-            const pad = (s, n) => (s || '').padEnd(n);
+        const formatMachinesHtmlTable = (machines) => {
             const cols = [
-                { key: 'machine_name', label: 'Nome Server', width: 20 },
-                { key: 'hostname', label: 'Hostname', width: 30 },
-                { key: 'application', label: 'Applicazione', width: 26 },
-                { key: 'environment', label: 'Ambiente', width: 16 },
-                { key: 'instance_type', label: 'Instance Type', width: 16 },
-                { key: 'server_type', label: 'Tipo', width: 20 }
+                { key: 'machine_name', label: 'Nome Server' },
+                { key: 'hostname', label: 'Hostname' },
+                { key: 'application', label: 'Applicazione' },
+                { key: 'environment', label: 'Ambiente' },
+                { key: 'instance_type', label: 'Instance Type' },
+                { key: 'server_type', label: 'Tipo' }
             ];
-            cols.forEach(c => {
-                c.width = Math.max(c.label.length, ...machines.map(m => (m[c.key] || '-').length)) + 2;
+            let html = '<table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:12px;">';
+            html += '<thead><tr>' + cols.map(c => `<th style="background:#f2f2f2;padding:6px 10px;text-align:left;font-weight:bold;border:1px solid #ccc;">${c.label}</th>`).join('') + '</tr></thead>';
+            html += '<tbody>';
+            machines.forEach(m => {
+                html += '<tr>' + cols.map(c => `<td style="padding:4px 10px;border:1px solid #ddd;">${m[c.key] || '-'}</td>`).join('') + '</tr>';
             });
-            const header = cols.map(c => pad(c.label, c.width)).join(' | ');
-            const sep = cols.map(c => '-'.repeat(c.width)).join('-+-');
-            const rows = machines.map(m => cols.map(c => pad(m[c.key] || '-', c.width)).join(' | '));
-            return [header, sep, ...rows].join('\n');
+            html += '</tbody></table>';
+            // Also create plain text fallback
+            const pad = (s, n) => (s || '').padEnd(n);
+            const widths = cols.map(c => Math.max(c.label.length, ...machines.map(m => (m[c.key] || '-').length)) + 2);
+            const header = cols.map((c, i) => pad(c.label, widths[i])).join(' | ');
+            const sep = widths.map(w => '-'.repeat(w)).join('-+-');
+            const rows = machines.map(m => cols.map((c, i) => pad(m[c.key] || '-', widths[i])).join(' | '));
+            const text = [header, sep, ...rows].join('\n');
+            return { html, text };
+        };
+
+        const copyMachinesAsTable = async (machines, label) => {
+            if (machines.length === 0) { showToast('Nessun server da copiare', 'info'); return; }
+            try {
+                const { html, text } = formatMachinesHtmlTable(machines);
+                await navigator.clipboard.write([
+                    new ClipboardItem({
+                        'text/html': new Blob([html], { type: 'text/html' }),
+                        'text/plain': new Blob([text], { type: 'text/plain' })
+                    })
+                ]);
+                showToast(`${machines.length} server copiati come tabella`, 'success');
+            } catch {
+                // Fallback to plain text
+                try {
+                    const { text } = formatMachinesHtmlTable(machines);
+                    await navigator.clipboard.writeText(text);
+                    showToast(`${machines.length} server copiati negli appunti`, 'success');
+                } catch { showToast('Errore nella copia', 'error'); }
+            }
         };
 
         // Copy all visible
-        vmView.querySelector('#vmCopyAll').addEventListener('click', async () => {
-            if (lastFiltered.length === 0) { showToast('Nessun server da copiare', 'info'); return; }
-            try {
-                const text = formatMachinesTable(lastFiltered);
-                await navigator.clipboard.writeText(text);
-                showToast(`${lastFiltered.length} server copiati negli appunti`, 'success');
-            } catch { showToast('Errore nella copia', 'error'); }
-        });
+        vmView.querySelector('#vmCopyAll').addEventListener('click', () => copyMachinesAsTable(lastFiltered, 'visibili'));
 
         // Copy selected
-        vmView.querySelector('#vmCopySelected').addEventListener('click', async () => {
+        vmView.querySelector('#vmCopySelected').addEventListener('click', () => {
             const selected = lastFiltered.filter(m => selectedRows.has(m.hostname));
-            if (selected.length === 0) { showToast('Nessun server selezionato', 'info'); return; }
-            try {
-                const text = formatMachinesTable(selected);
-                await navigator.clipboard.writeText(text);
-                showToast(`${selected.length} server copiati negli appunti`, 'success');
-            } catch { showToast('Errore nella copia', 'error'); }
+            copyMachinesAsTable(selected, 'selezionati');
         });
 
         // Select all checkbox
@@ -1863,6 +2105,262 @@ const App = (() => {
         renderFilterChips();
         renderRows();
         vmView.querySelector('#vmFilterSearch').addEventListener('input', renderRows);
+    }
+
+    // ============================================
+    // EBS Disk List View
+    // ============================================
+    let ebsDisks = [];
+
+    function showEBSList() {
+        currentApp = null;
+        currentEnv = null;
+        $$('#appList .nav-item').forEach(i => i.classList.remove('active'));
+        $$('.sidebar-action-btn').forEach(b => b.classList.remove('active'));
+        const ebsBtn = document.getElementById('ebsListBtn');
+        if (ebsBtn) ebsBtn.classList.add('active');
+        closeEnvPopover();
+        updateBreadcrumb(null);
+        $('#breadcrumb').innerHTML = '<span class="breadcrumb-item active">Elenco Dischi AWS</span>';
+        renderEBSList();
+        showView('ebs-list');
+    }
+
+    function renderEBSList() {
+        const ebsView = document.getElementById('ebsListView');
+        if (!ebsView) return;
+
+        const allDisks = ebsDisks;
+        const apps = [...new Set(allDisks.map(d => d.application))].sort();
+        const envs = [...new Set(allDisks.map(d => d.environment))].sort();
+        const activeApps = new Set();
+        const activeEnvs = new Set();
+        let sortCol = null, sortAsc = true;
+        let lastFiltered = allDisks;
+
+        // Totals calculation
+        const calcTotals = (disks) => {
+            const totalSize = disks.reduce((s, d) => s + (parseFloat(d.size_gb) || 0), 0);
+            const totalIops = disks.reduce((s, d) => s + (parseInt(d.iops) || 0), 0);
+            const totalThroughput = disks.reduce((s, d) => s + (parseFloat(d.throughput) || 0), 0);
+            return { count: disks.length, totalSize, totalIops, totalThroughput };
+        };
+
+        const isAdmin = DataManager.getCurrentUser()?.role === 'Admin';
+
+        ebsView.innerHTML = `
+            <div class="vm-list-header">
+                <div class="vm-list-title-row">
+                    <div>
+                        <h2>Elenco Dischi AWS (EBS)</h2>
+                        <div class="vm-list-subtitle">${allDisks.length} volumi totali</div>
+                    </div>
+                    <div class="vm-list-actions">
+                        ${isAdmin ? `<button class="btn-secondary" id="ebsImportBtn">
+                            ${SVG.upload} Importa CSV Dischi
+                        </button>
+                        <input type="file" id="ebsCsvInput" accept=".csv" style="display:none">` : ''}
+                        <button class="btn-secondary vm-copy-btn" id="ebsCopyAll">
+                            ${SVG.copy} Copia elenco visibile
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="ebs-totals" id="ebsTotals"></div>
+            <div class="vm-list-filters">
+                <div class="vm-filter-row">
+                    <span class="vm-filter-label">Applicazione</span>
+                    <div class="vm-filter-chips" id="ebsAppChips"></div>
+                </div>
+                <div class="vm-filter-row">
+                    <span class="vm-filter-label">Ambiente</span>
+                    <div class="vm-filter-chips" id="ebsEnvChips"></div>
+                </div>
+                <div class="vm-filter-row">
+                    <div class="vm-filter-search-group">
+                        <input type="text" class="vm-filter-search" id="ebsFilterSearch" placeholder="Cerca per Volume ID, tipo, applicazione...">
+                    </div>
+                    <span class="vm-filter-count" id="ebsFilterCount">${allDisks.length} risultati</span>
+                </div>
+            </div>
+            <div class="vm-list-table-wrapper">
+                <table class="vm-list-table">
+                    <thead>
+                        <tr>
+                            <th class="vm-th-sortable" data-col="volume_id">Volume ID <span class="vm-sort-icon"></span></th>
+                            <th class="vm-th-sortable" data-col="size_gb">Dimensione (GB) <span class="vm-sort-icon"></span></th>
+                            <th class="vm-th-sortable" data-col="iops">IOPS <span class="vm-sort-icon"></span></th>
+                            <th class="vm-th-sortable" data-col="throughput">Throughput <span class="vm-sort-icon"></span></th>
+                            <th class="vm-th-sortable" data-col="volume_type">Tipo <span class="vm-sort-icon"></span></th>
+                            <th class="vm-th-sortable vm-th-app" data-col="application">Applicazione <span class="vm-sort-icon"></span></th>
+                            <th class="vm-th-sortable vm-th-env" data-col="environment">Ambiente <span class="vm-sort-icon"></span></th>
+                        </tr>
+                    </thead>
+                    <tbody id="ebsListBody"></tbody>
+                </table>
+            </div>`;
+
+        if (allDisks.length === 0) {
+            ebsView.querySelector('#ebsListBody').innerHTML = `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-tertiary);">Nessun disco importato. ${isAdmin ? 'Usa "Importa CSV Dischi" per caricare i dati.' : 'Contattare un amministratore per importare i dati.'}</td></tr>`;
+        }
+
+        const renderTotals = (disks) => {
+            const t = calcTotals(disks);
+            const fmt = n => n.toLocaleString('it-IT');
+            ebsView.querySelector('#ebsTotals').innerHTML = `
+                <div class="ebs-total-card"><div class="ebs-total-value">${fmt(t.count)}</div><div class="ebs-total-label">Volumi</div></div>
+                <div class="ebs-total-card"><div class="ebs-total-value">${fmt(Math.round(t.totalSize))}</div><div class="ebs-total-label">GB Totali</div></div>
+                <div class="ebs-total-card"><div class="ebs-total-value">${fmt(t.totalIops)}</div><div class="ebs-total-label">IOPS Totali</div></div>
+                <div class="ebs-total-card"><div class="ebs-total-value">${fmt(Math.round(t.totalThroughput))}</div><div class="ebs-total-label">Throughput Tot.</div></div>`;
+        };
+
+        const renderFilterChips = () => {
+            const appContainer = ebsView.querySelector('#ebsAppChips');
+            const envContainer = ebsView.querySelector('#ebsEnvChips');
+            appContainer.innerHTML = '';
+            envContainer.innerHTML = '';
+            apps.forEach((a, i) => {
+                const color = appColors[i % appColors.length];
+                const chip = document.createElement('button');
+                chip.className = 'gc-filter-chip' + (activeApps.has(a) ? ' active' : '');
+                chip.innerHTML = `<span class="gc-filter-dot" style="background:${color}"></span>${a}`;
+                chip.addEventListener('click', () => {
+                    if (activeApps.has(a)) activeApps.delete(a); else activeApps.add(a);
+                    renderFilterChips(); renderRows();
+                });
+                appContainer.appendChild(chip);
+            });
+            envs.forEach(e => {
+                const color = envColors[e] || '#7a7a96';
+                const chip = document.createElement('button');
+                chip.className = 'gc-filter-chip' + (activeEnvs.has(e) ? ' active' : '');
+                chip.innerHTML = `<span class="gc-filter-dot" style="background:${color}"></span>${e}`;
+                chip.addEventListener('click', () => {
+                    if (activeEnvs.has(e)) activeEnvs.delete(e); else activeEnvs.add(e);
+                    renderFilterChips(); renderRows();
+                });
+                envContainer.appendChild(chip);
+            });
+        };
+
+        const renderRows = () => {
+            const search = ebsView.querySelector('#ebsFilterSearch').value.toLowerCase();
+            const tbody = ebsView.querySelector('#ebsListBody');
+            let filtered = allDisks.filter(d => {
+                if (activeApps.size > 0 && !activeApps.has(d.application)) return false;
+                if (activeEnvs.size > 0 && !activeEnvs.has(d.environment)) return false;
+                if (search && !`${d.volume_id} ${d.volume_type} ${d.application} ${d.environment} ${d.size_gb}`.toLowerCase().includes(search)) return false;
+                return true;
+            });
+            if (sortCol) {
+                filtered.sort((a, b) => {
+                    let va = a[sortCol] || '', vb = b[sortCol] || '';
+                    if (['size_gb', 'iops', 'throughput'].includes(sortCol)) {
+                        va = parseFloat(va) || 0; vb = parseFloat(vb) || 0;
+                        return sortAsc ? va - vb : vb - va;
+                    }
+                    va = String(va).toLowerCase(); vb = String(vb).toLowerCase();
+                    return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+                });
+            }
+            lastFiltered = filtered;
+            ebsView.querySelector('#ebsFilterCount').textContent = filtered.length + ' risultati';
+            renderTotals(filtered);
+
+            ebsView.querySelectorAll('.vm-th-sortable').forEach(th => {
+                const icon = th.querySelector('.vm-sort-icon');
+                if (th.dataset.col === sortCol) {
+                    icon.textContent = sortAsc ? '\u25B2' : '\u25BC';
+                    th.classList.add('vm-th-sorted');
+                } else {
+                    icon.textContent = '\u2195';
+                    th.classList.remove('vm-th-sorted');
+                }
+            });
+
+            const fmt = n => Number(n).toLocaleString('it-IT');
+            tbody.innerHTML = filtered.map(d => {
+                const eColor = envColors[d.environment] || '#7a7a96';
+                return `<tr>
+                    <td class="vm-cell-hostname vm-cell-copyable" data-copy="${d.volume_id}" title="Clicca per copiare"><code>${d.volume_id}</code> <span class="vm-copy-hint">${SVG.copy}</span></td>
+                    <td style="text-align:right;font-weight:600;">${fmt(d.size_gb || 0)}</td>
+                    <td style="text-align:right;">${fmt(d.iops || 0)}</td>
+                    <td style="text-align:right;">${fmt(d.throughput || 0)}</td>
+                    <td><code class="vm-instance-code">${d.volume_type || '-'}</code></td>
+                    <td class="vm-cell-app">${d.application || '-'}</td>
+                    <td class="vm-cell-env"><span class="vm-env-badge" style="background:${eColor}14;color:${eColor};border-color:${eColor}30">${d.environment || '-'}</span></td>
+                </tr>`;
+            }).join('');
+
+            tbody.querySelectorAll('.vm-cell-copyable').forEach(cell => {
+                cell.addEventListener('click', async () => {
+                    try { await navigator.clipboard.writeText(cell.dataset.copy); showToast('Copiato: ' + cell.dataset.copy, 'success'); } catch {}
+                });
+            });
+        };
+
+        // EBS CSV import
+        if (isAdmin) {
+            ebsView.querySelector('#ebsImportBtn').addEventListener('click', () => ebsView.querySelector('#ebsCsvInput').click());
+            ebsView.querySelector('#ebsCsvInput').addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    const lines = ev.target.result.trim().split('\n');
+                    if (lines.length < 2) { showToast('CSV vuoto o non valido', 'error'); return; }
+                    const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/\s+/g, '_'));
+                    const parsed = [];
+                    for (let i = 1; i < lines.length; i++) {
+                        const vals = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+                        if (vals.length < headers.length) continue;
+                        const obj = {};
+                        headers.forEach((h, idx) => { obj[h] = vals[idx]; });
+                        parsed.push(obj);
+                    }
+                    ebsDisks = parsed;
+                    try { localStorage.setItem('finops_ebsDisks', JSON.stringify(ebsDisks)); } catch {}
+                    AuditLog.log('Import CSV Dischi', `${parsed.length} volumi importati`);
+                    renderEBSList();
+                    showToast(`${parsed.length} volumi EBS importati`, 'success');
+                };
+                reader.readAsText(file);
+                e.target.value = '';
+            });
+        }
+
+        // Copy
+        ebsView.querySelector('#ebsCopyAll').addEventListener('click', async () => {
+            if (lastFiltered.length === 0) { showToast('Nessun dato da copiare', 'info'); return; }
+            const cols = [
+                { key: 'volume_id', label: 'Volume ID' }, { key: 'size_gb', label: 'Size (GB)' },
+                { key: 'iops', label: 'IOPS' }, { key: 'throughput', label: 'Throughput' },
+                { key: 'volume_type', label: 'Tipo' }, { key: 'application', label: 'Applicazione' },
+                { key: 'environment', label: 'Ambiente' }
+            ];
+            let html = '<table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:12px;">';
+            html += '<thead><tr>' + cols.map(c => `<th style="background:#f2f2f2;padding:6px 10px;text-align:left;font-weight:bold;border:1px solid #ccc;">${c.label}</th>`).join('') + '</tr></thead><tbody>';
+            lastFiltered.forEach(d => { html += '<tr>' + cols.map(c => `<td style="padding:4px 10px;border:1px solid #ddd;">${d[c.key] || '-'}</td>`).join('') + '</tr>'; });
+            html += '</tbody></table>';
+            try {
+                await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([lastFiltered.map(d => cols.map(c => d[c.key] || '-').join('\t')).join('\n')], { type: 'text/plain' }) })]);
+                showToast(`${lastFiltered.length} volumi copiati come tabella`, 'success');
+            } catch { showToast('Errore nella copia', 'error'); }
+        });
+
+        // Sort
+        ebsView.querySelectorAll('.vm-th-sortable').forEach(th => {
+            th.addEventListener('click', () => {
+                const col = th.dataset.col;
+                if (sortCol === col) sortAsc = !sortAsc;
+                else { sortCol = col; sortAsc = true; }
+                renderRows();
+            });
+        });
+
+        renderFilterChips();
+        renderRows();
+        ebsView.querySelector('#ebsFilterSearch').addEventListener('input', renderRows);
     }
 
     // ============================================
@@ -1892,7 +2390,7 @@ const App = (() => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `shutdown-schedule-${new Date().toISOString().split('T')[0]}.json`;
+        a.download = `finops-schedule-${new Date().toISOString().split('T')[0]}.json`;
         a.click();
         URL.revokeObjectURL(url);
         AuditLog.log('Export JSON', `${data.length} entries esportate`);
@@ -1930,6 +2428,9 @@ const App = (() => {
             }
             if (currentView === 'vm-list') {
                 renderVMList();
+            }
+            if (currentView === 'ebs-list') {
+                renderEBSList();
             }
             updateChangesBadge();
             AuditLog.log('Aggiornamento stato', 'Dati ricaricati');
@@ -2060,10 +2561,11 @@ const App = (() => {
                     entryDetail += `<div class="save-entry-detail">${typeLabel}${recLabel}</div>`;
                 });
 
-                detailHtml += `<div class="save-hostname-row">
+                detailHtml += `<div class="save-hostname-row" data-save-hostname="${hostname}" data-save-app="${c.app}" data-save-env="${c.env}">
                     <span class="save-hostname-name">${hostname}</span>
                     ${changeType}
                     ${entryDetail}
+                    <button class="save-delete-btn" data-hostname="${hostname}" data-app="${c.app}" data-env="${c.env}" title="Rimuovi da questo salvataggio">&times;</button>
                 </div>`;
             });
 
@@ -2086,7 +2588,21 @@ const App = (() => {
             confirmLabel: 'Salva Modifiche',
             iconType: 'accent',
             confirmClass: 'btn-primary',
-            wide: true
+            wide: true,
+            onMount: (overlay) => {
+                overlay.querySelectorAll('.save-delete-btn').forEach(btn => {
+                    btn.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        const h = btn.dataset.hostname;
+                        const app = btn.dataset.app;
+                        const env = btn.dataset.env;
+                        DataManager.removeAllSchedules(app, env, h);
+                        AuditLog.log('Eliminazione entry da salvataggio', `${app} / ${env} / ${h}`);
+                        btn.closest('.save-hostname-row').remove();
+                        showToast(`Rimosso: ${h}`, 'info');
+                    });
+                });
+            }
         });
         if (!confirmed) return;
 
@@ -2197,6 +2713,56 @@ const App = (() => {
         container.appendChild(toast);
         setTimeout(() => { toast.classList.add('removing'); setTimeout(() => toast.remove(), 300); }, 3000);
     }
+
+    // ============================================
+    // JS Security — Integrity Monitor
+    // ============================================
+    (function securityInit() {
+        // Disable right-click context menu on production
+        // Re-fetch CSV on focus to detect external changes
+        let lastFocusTime = 0;
+        window.addEventListener('focus', async () => {
+            const now = Date.now();
+            if (now - lastFocusTime < 30000) return; // Skip if re-focused within 30s
+            lastFocusTime = now;
+            // Silently verify CSV data integrity on window focus
+            try {
+                const resp = await fetch('data/machines.csv?_=' + now);
+                if (resp.ok) {
+                    const text = await resp.text();
+                    const freshCount = text.trim().split('\n').length - 1;
+                    const currentCount = DataManager.machines.length;
+                    if (freshCount !== currentCount && currentCount > 0) {
+                        console.warn('[Security] CSV data changed externally:', freshCount, 'vs', currentCount);
+                    }
+                }
+            } catch {}
+        });
+
+        // Protect against localStorage tampering — verify schedules format
+        const rawSchedules = localStorage.getItem('shutdownScheduler_schedules');
+        if (rawSchedules) {
+            try {
+                const parsed = JSON.parse(rawSchedules);
+                if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+                    console.warn('[Security] Invalid schedules format in localStorage, clearing');
+                    localStorage.removeItem('shutdownScheduler_schedules');
+                }
+            } catch {
+                console.warn('[Security] Corrupted schedules in localStorage, clearing');
+                localStorage.removeItem('shutdownScheduler_schedules');
+            }
+        }
+    })();
+
+    // Prevent data loss on page reload
+    window.addEventListener('beforeunload', (e) => {
+        const changes = DynamoService.getModifiedAppEnvs(DataManager.getSchedulesRef());
+        if (changes.length > 0) {
+            e.preventDefault();
+            e.returnValue = 'Hai modifiche non salvate. Vuoi davvero uscire?';
+        }
+    });
 
     document.addEventListener('DOMContentLoaded', init);
     return { init };
