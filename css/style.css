@@ -2361,6 +2361,10 @@ body.read-only #saveConfigBtn,
 body.read-only .btn-accent-highlight,
 body.read-only .add-note-btn { display: none !important; }
 
+/* Admin-only: Import CSV & Export JSON */
+body:not(.is-admin) #importCsvBtn,
+body:not(.is-admin) #exportBtn { display: none !important; }
+
 .ro-banner {
     padding: 6px 14px;
     background: var(--warning-subtle);

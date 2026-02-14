@@ -399,25 +399,22 @@ Quando l'applicazione e ospitata su **GitHub Enterprise Pages**, l'autenticazion
 ### Come Funziona
 
 ```
-Browser                         GitHub Enterprise              Lambda (Python)
-   |                                  |                             |
-1. Click "Collega GitHub"            |                             |
-   |--- GET /login/oauth/authorize ->|                             |
-   |    redirect_uri=LAMBDA_URL      |                             |
-   |                                  | (SSO session)              |
-   |<-- 302 LAMBDA_URL?code=abc ----|                             |
-   |                                                                |
-   |--- GET LAMBDA_URL?code=abc ---------------------------------->|
-   |                                  |<-- POST /access_token -----|
-   |                                  |-- token:xxx -------------->|
-   |                                  |<-- GET /api/v3/user -------|
-   |                                  |-- { login:"user" } ------->|
-   |<-- 302 pages.github.X.com/?ghuser=user -----------------------|
-   |
-2. Frontend legge ?ghuser= → salva in localStorage → login automatico
+Fase 1: OAuth (redirect)
+Browser → GHE /login/oauth/authorize → Lambda GET ?code= → scambio token → get login
+Lambda crea transit token HMAC (5 min) → 302 redirect a pages/?ghtoken=TOKEN_FIRMATO
+
+Fase 2: Verifica (POST)
+Frontend legge ?ghtoken= → POST alla Lambda {token: TOKEN}
+Lambda verifica firma HMAC + scadenza → ritorna {login: "utente", session_token: "TOKEN_8H"}
+Frontend salva session_token in localStorage
+
+Fase 3: Visite successive
+Frontend legge session_token da localStorage → POST alla Lambda per verifica
+Lambda verifica → ritorna {login: "utente"} → app si avvia
+Se scaduto (dopo 8 ore) → mostra bottone "Collega GitHub Enterprise"
 ```
 
-Tutto avviene via redirect del browser. Nessuna chiamata CORS dal frontend.
+I token sono firmati con HMAC-SHA256. Nessuno puo' falsificare `?ghtoken=` senza conoscere il `SIGNING_SECRET`.
 
 ### Setup Passo-Passo
 
@@ -444,6 +441,7 @@ Tutto avviene via redirect del browser. Nessuna chiamata CORS dal frontend.
 | `OAUTH_CLIENT_ID` | Client ID dal passo A |
 | `OAUTH_CLIENT_SECRET` | Client Secret dal passo A |
 | `REDIRECT_URL` | `https://pages.github.AZIENDA.com/PATH/` (URL del sito Pages) |
+| `SIGNING_SECRET` | Chiave HMAC 256-bit — generare con `python3 -c "import secrets; print(secrets.token_hex(32))"` |
 | `SSL_VERIFY` | `true` (default) oppure `false` per certificati interni |
 
 4. La Lambda deve poter raggiungere `github.AZIENDA.com` dalla rete

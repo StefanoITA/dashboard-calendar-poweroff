@@ -60,14 +60,34 @@ const App = (() => {
     };
 
     const SSO_STORAGE_KEY = 'shutdownScheduler_gheLogin';
+    const SSO_TOKEN_KEY = 'shutdownScheduler_gheToken';
 
     function startOAuthFlow() {
         const params = new URLSearchParams({
             client_id: SSO_CONFIG.oauthClientId,
-            redirect_uri: SSO_CONFIG.oauthLambdaUrl,
             scope: 'read:user'
         });
         window.location.href = `${SSO_CONFIG.gheBaseUrl}/login/oauth/authorize?${params}`;
+    }
+
+    async function verifyToken(token) {
+        try {
+            const resp = await fetch(SSO_CONFIG.oauthLambdaUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token })
+            });
+            if (!resp.ok) return null;
+            return await resp.json();
+        } catch (err) {
+            console.error('[SSO] Token verify failed:', err.message);
+            return null;
+        }
+    }
+
+    function clearSSOSession() {
+        localStorage.removeItem(SSO_STORAGE_KEY);
+        localStorage.removeItem(SSO_TOKEN_KEY);
     }
 
     function showGitHubLinkScreen() {
@@ -274,37 +294,53 @@ const App = (() => {
 
         const users = DataManager.getUsers();
 
-        // SSO Authentication via OAuth
+        // SSO Authentication via OAuth + Token HMAC
         if (SSO_CONFIG.enabled) {
             let ghUsername = null;
 
-            // 1. Check for OAuth redirect from Lambda (?ghuser= or ?ghuser_error= in URL)
             const urlParams = new URLSearchParams(window.location.search);
-            const oauthLogin = urlParams.get('ghuser');
+            const transitToken = urlParams.get('ghtoken');
             const oauthError = urlParams.get('ghuser_error');
-            // Clean the URL
-            if (oauthLogin || oauthError) {
+
+            // Clean URL immediately (remove token from address bar)
+            if (transitToken || oauthError) {
                 window.history.replaceState({}, document.title, window.location.pathname);
             }
+
             if (oauthError) {
-                console.error('[SSO] OAuth error:', oauthError);
-            }
-            if (oauthLogin) {
-                ghUsername = oauthLogin;
-                localStorage.setItem(SSO_STORAGE_KEY, ghUsername);
-                console.log('[SSO] OAuth login:', ghUsername);
+                console.error('[SSO] OAuth error:', decodeURIComponent(oauthError));
             }
 
-            // 2. Check localStorage for previous OAuth session
-            if (!ghUsername) {
-                const storedLogin = localStorage.getItem(SSO_STORAGE_KEY);
-                if (storedLogin) {
-                    ghUsername = storedLogin;
-                    console.log('[SSO] Restored session:', ghUsername);
+            // 1. Transit token from OAuth redirect → verify + exchange for session
+            if (transitToken) {
+                const result = await verifyToken(transitToken);
+                if (result && result.login && result.session_token) {
+                    ghUsername = result.login;
+                    localStorage.setItem(SSO_TOKEN_KEY, result.session_token);
+                    localStorage.setItem(SSO_STORAGE_KEY, ghUsername);
+                    console.log('[SSO] OAuth login verified:', ghUsername);
+                } else {
+                    console.error('[SSO] Transit token verification failed');
                 }
             }
 
-            // 3. No session → show "Collega GitHub Enterprise" screen
+            // 2. Stored session token → verify server-side
+            if (!ghUsername) {
+                const storedToken = localStorage.getItem(SSO_TOKEN_KEY);
+                if (storedToken) {
+                    const result = await verifyToken(storedToken);
+                    if (result && result.login) {
+                        ghUsername = result.login;
+                        localStorage.setItem(SSO_STORAGE_KEY, ghUsername);
+                        console.log('[SSO] Session restored:', ghUsername);
+                    } else {
+                        clearSSOSession();
+                        console.log('[SSO] Session expired, re-authentication needed');
+                    }
+                }
+            }
+
+            // 3. No valid session → show "Collega GitHub Enterprise" screen
             if (!ghUsername) {
                 showGitHubLinkScreen();
                 return;
@@ -318,7 +354,7 @@ const App = (() => {
                 localStorage.setItem('shutdownScheduler_userId', ssoUser.id);
                 console.log('[SSO] User matched:', ssoUser.name, '(' + ssoUser.role + ')');
             } else {
-                localStorage.removeItem(SSO_STORAGE_KEY);
+                clearSSOSession();
                 showUnauthorizedScreen(ghUsername);
                 return;
             }
@@ -373,7 +409,7 @@ const App = (() => {
             title = 'Accesso non autorizzato';
             message = `L'utenza GitHub Enterprise <strong>${userId}</strong> non \u00e8 associata a nessun profilo in questa applicazione.`;
             sub = 'Richiedere a un amministratore di aggiungere il proprio <code>github_user</code> nel file <code>users.json</code>.';
-            actions = `<button class="btn-primary" onclick="localStorage.removeItem('${SSO_STORAGE_KEY}');location.reload();">Riprova con altro account</button>`;
+            actions = `<button class="btn-primary" onclick="localStorage.removeItem('${SSO_STORAGE_KEY}');localStorage.removeItem('${SSO_TOKEN_KEY}');location.reload();">Riprova con altro account</button>`;
         } else {
             // Local mode — unknown user ID
             title = 'Accesso non autorizzato';
@@ -548,8 +584,12 @@ const App = (() => {
     }
 
     function applyRoleMode() {
+        const current = DataManager.getCurrentUser();
         const readOnly = DataManager.isReadOnly();
+        const isAdmin = current && current.role === 'Admin';
+
         document.body.classList.toggle('read-only', readOnly);
+        document.body.classList.toggle('is-admin', isAdmin);
 
         const existing = document.querySelector('.ro-banner');
         if (existing) existing.remove();
