@@ -2764,6 +2764,12 @@ const App = (() => {
         }
     });
 
-    document.addEventListener('DOMContentLoaded', init);
+    // Scripts are loaded dynamically after DOMContentLoaded already fired,
+    // so we must check readyState and call init() directly if DOM is ready.
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
     return { init };
 })();
