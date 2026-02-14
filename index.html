@@ -16,22 +16,41 @@
             position: fixed; inset: 0; z-index: 99999;
             background: #f8f9fb; display: flex; align-items: center; justify-content: center;
         }
-        [data-theme="dark"] .preloader { background: #0a0a0f; }
+        .preloader.dark { background: #0a0a0f; }
         .preloader-spinner {
             width: 36px; height: 36px; border: 3px solid #e4e6ed;
             border-top-color: #c2410c; border-radius: 50%;
             animation: preloaderSpin 0.7s linear infinite;
         }
-        [data-theme="dark"] .preloader-spinner { border-color: #252538; border-top-color: #ea580c; }
+        .preloader.dark .preloader-spinner { border-color: #252538; border-top-color: #ea580c; }
         @keyframes preloaderSpin { to { transform: rotate(360deg); } }
         .preloader.hidden { opacity: 0; pointer-events: none; transition: opacity 0.3s ease; }
     </style>
+    <script>
+        // Apply saved theme IMMEDIATELY to preloader (before body renders)
+        (function() {
+            var t = localStorage.getItem('shutdownScheduler_theme');
+            if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+        })();
+    </script>
 </head>
 <body>
     <!-- ========== Preloader ========== -->
     <div class="preloader" id="preloader">
         <div class="preloader-spinner"></div>
     </div>
+    <script>
+        // Match preloader to saved theme instantly
+        (function() {
+            var t = localStorage.getItem('shutdownScheduler_theme');
+            if (t === 'dark') document.getElementById('preloader').classList.add('dark');
+            // Safety: auto-hide preloader after 8 seconds no matter what
+            setTimeout(function() {
+                var p = document.getElementById('preloader');
+                if (p) { p.classList.add('hidden'); setTimeout(function() { p.remove(); }, 400); }
+            }, 8000);
+        })();
+    </script>
 
     <!-- ========== Sidebar ========== -->
     <aside class="sidebar">
