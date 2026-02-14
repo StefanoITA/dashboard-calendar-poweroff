@@ -1,5 +1,5 @@
 /* ============================================
-   Shutdown Scheduler — Light/Dark Theme
+   FinOps Platform — Light/Dark Theme
    Deep Orange Accent (readable)
    ============================================ */
 
@@ -1966,7 +1966,7 @@ body {
    ============================================ */
 .general-calendar-view { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 24px 24px 44px; }
 
-.gc-header { margin-bottom: 16px; }
+.gc-header { margin-bottom: 16px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .gc-header h2 { font-size: 1.35rem; font-weight: 700; letter-spacing: -0.02em; }
 .gc-subtitle { font-size: 0.84rem; color: var(--text-tertiary); margin-top: 4px; }
 
@@ -2884,6 +2884,168 @@ body:not(.is-admin) #exportBtn { display: none !important; }
 }
 
 .footer-flag { font-size: 0.82rem; }
+
+/* ============================================
+   Logout Button
+   ============================================ */
+.btn-logout {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    margin-top: 8px;
+    padding: 7px 12px;
+    font-family: var(--font);
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--danger);
+    background: var(--danger-subtle);
+    border: 1px solid rgba(220, 38, 38, 0.18);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.btn-logout:hover {
+    background: var(--danger-bg);
+    border-color: var(--danger);
+}
+
+/* ============================================
+   Machine Group Headers (Web/App/DB)
+   ============================================ */
+.machine-group-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 0 6px;
+    margin-top: 4px;
+    grid-column: 1 / -1;
+}
+
+.machine-group-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-sm);
+}
+
+.machine-group-icon.web { color: #2563eb; background: rgba(37, 99, 235, 0.08); }
+.machine-group-icon.app { color: #7c3aed; background: rgba(124, 58, 237, 0.08); }
+.machine-group-icon.db { color: #059669; background: rgba(5, 150, 105, 0.08); }
+
+.machine-group-label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-tertiary);
+}
+
+.machine-group-count {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    background: var(--bg-tertiary);
+    padding: 1px 7px;
+    border-radius: 10px;
+}
+
+/* ============================================
+   EBS Totals
+   ============================================ */
+.ebs-totals {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.ebs-total-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    text-align: center;
+}
+
+.ebs-total-value {
+    font-size: 1.4rem;
+    font-weight: 800;
+    color: var(--accent);
+    letter-spacing: -0.02em;
+}
+
+.ebs-total-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-top: 2px;
+}
+
+/* ============================================
+   Save Dialog Delete Button
+   ============================================ */
+.save-hostname-row {
+    position: relative;
+}
+
+.save-delete-btn {
+    position: absolute;
+    right: 2px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: var(--text-tertiary);
+    font-size: 1.1rem;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: all var(--transition-fast);
+    opacity: 0;
+    line-height: 1;
+}
+
+.save-hostname-row:hover .save-delete-btn {
+    opacity: 1;
+}
+
+.save-delete-btn:hover {
+    color: var(--danger);
+    background: var(--danger-subtle);
+}
+
+/* ============================================
+   Searchable Filter Input (inline)
+   ============================================ */
+.gc-filter-search-inline {
+    padding: 4px 10px;
+    font-family: var(--font);
+    font-size: 0.76rem;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    width: 140px;
+    transition: all var(--transition-fast);
+}
+
+.gc-filter-search-inline:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-subtle);
+    width: 180px;
+}
+
+.gc-filter-row-searchable {
+    flex-wrap: wrap;
+}
 
 /* ============================================
    Responsive

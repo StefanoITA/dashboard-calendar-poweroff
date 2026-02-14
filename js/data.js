@@ -1,6 +1,6 @@
 /* ============================================
-   Data Layer — CSV Parsing, State & Roles
-   Per-app RW/RO, Notes, Messages
+   FinOps Platform — Data Layer
+   CSV Parsing, State & Roles, Per-app RW/RO
    ============================================ */
 const DataManager = (() => {
     let machines = [];
@@ -46,13 +46,27 @@ const DataManager = (() => {
     // ============================================
     // User & Roles (per-app RW/RO)
     // ============================================
+    function cacheBust(url) { return url + (url.includes('?') ? '&' : '?') + '_=' + Date.now(); }
+
+    // Users source: 'json' (local file) or future 'dynamodb' (API endpoint)
+    const USERS_CONFIG = {
+        source: 'json', // Change to 'dynamodb' when migrating
+        endpoint: '' // Set to API Gateway URL for DynamoDB users
+    };
+
     async function loadUsers() {
         try {
-            const response = await fetch('data/users.json');
-            const data = await response.json();
+            let data;
+            if (USERS_CONFIG.source === 'dynamodb' && USERS_CONFIG.endpoint) {
+                const response = await fetch(cacheBust(USERS_CONFIG.endpoint));
+                data = await response.json();
+            } else {
+                const response = await fetch(cacheBust('data/users.json'));
+                data = await response.json();
+            }
             users = data.users || [];
         } catch (e) {
-            console.warn('Could not load users.json, using defaults', e);
+            console.warn('Could not load users, using defaults', e);
             users = [{ id: 'admin', name: 'Admin', role: 'Admin', applications: ['*'] }];
         }
         return users;
@@ -165,7 +179,7 @@ const DataManager = (() => {
 
     async function loadFromPath(path) {
         try {
-            const response = await fetch(path);
+            const response = await fetch(cacheBust(path));
             const text = await response.text();
             machines = parseCSV(text);
             loadSchedulesFromStorage();
@@ -182,7 +196,7 @@ const DataManager = (() => {
     // ============================================
     async function loadMessages() {
         try {
-            const response = await fetch('data/messages.json');
+            const response = await fetch(cacheBust('data/messages.json'));
             const data = await response.json();
             systemMessages = data.messages || [];
         } catch (e) {
@@ -377,6 +391,29 @@ const DataManager = (() => {
             if (schedules[key]) {
                 schedules[key] = schedules[key].filter(e => e.envGroupId !== groupId);
                 if (schedules[key].length === 0) delete schedules[key];
+            }
+        });
+        saveSchedulesToStorage();
+    }
+
+    function reincludeInEnvGroup(appName, envName, groupId) {
+        const ms = getMachines(appName, envName);
+        // Find an existing entry from this group to clone
+        let templateEntry = null;
+        for (const m of ms) {
+            const key = scheduleKey(appName, envName, m.hostname);
+            const entries = schedules[key] || [];
+            const match = entries.find(e => e.envGroupId === groupId);
+            if (match) { templateEntry = match; break; }
+        }
+        if (!templateEntry) return;
+        // Add the entry to all machines that don't have it
+        ms.forEach(m => {
+            const key = scheduleKey(appName, envName, m.hostname);
+            const entries = schedules[key] || [];
+            if (!entries.find(e => e.envGroupId === groupId)) {
+                if (!schedules[key]) schedules[key] = [];
+                schedules[key].push({ ...templateEntry, id: generateId() });
             }
         });
         saveSchedulesToStorage();
@@ -630,7 +667,7 @@ const DataManager = (() => {
         exportSchedules, getAllSchedulesFlat, getStats, envHasSchedules, getEnvScheduleStats,
         getSchedulesRef, getMessages, getUpcomingSchedules,
         getNotes, addNote, updateNote, deleteNote, getAllNotesCount,
-        getEnvGroups, updateEnvGroup, removeEnvGroup, excludeFromEnvGroup,
+        getEnvGroups, updateEnvGroup, removeEnvGroup, excludeFromEnvGroup, reincludeInEnvGroup,
         isGlobalReadOnly, canViewVMList, getVMListMachines, generateCronjobs,
         get machines() { return machines; }
     };
