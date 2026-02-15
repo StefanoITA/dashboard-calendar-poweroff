@@ -538,6 +538,72 @@ body {
 }
 
 /* ============================================
+   DynamoDB Status Indicator
+   ============================================ */
+.dynamo-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-subtle);
+    cursor: default;
+    user-select: none;
+    transition: all var(--transition-fast);
+}
+
+.dynamo-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-tertiary);
+    transition: background var(--transition-fast);
+    flex-shrink: 0;
+}
+
+.dynamo-label {
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+/* Online — green */
+.dynamo-status[data-status="online"] .dynamo-dot {
+    background: var(--success);
+    box-shadow: 0 0 6px rgba(5, 150, 105, 0.5);
+}
+.dynamo-status[data-status="online"] .dynamo-label { color: var(--success); }
+
+/* Connecting — yellow pulse */
+.dynamo-status[data-status="connecting"] .dynamo-dot {
+    background: var(--warning);
+    animation: dynamoPulse 1.2s ease-in-out infinite;
+}
+.dynamo-status[data-status="connecting"] .dynamo-label { color: var(--warning); }
+
+@keyframes dynamoPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+}
+
+/* Offline — red */
+.dynamo-status[data-status="offline"] .dynamo-dot {
+    background: var(--danger);
+    box-shadow: 0 0 6px rgba(220, 38, 38, 0.5);
+}
+.dynamo-status[data-status="offline"] .dynamo-label { color: var(--danger); }
+
+/* Disabled / local mode — muted */
+.dynamo-status[data-status="disabled"] .dynamo-dot {
+    background: var(--text-tertiary);
+    opacity: 0.5;
+}
+.dynamo-status[data-status="disabled"] .dynamo-label { color: var(--text-tertiary); }
+
+/* ============================================
    Buttons
    ============================================ */
 .btn-primary {
@@ -2959,7 +3025,7 @@ body:not(.is-admin) #exportBtn { display: none !important; }
    ============================================ */
 .ebs-totals {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 12px;
     margin-bottom: 16px;
 }
@@ -2970,6 +3036,13 @@ body:not(.is-admin) #exportBtn { display: none !important; }
     border-radius: var(--radius-md);
     padding: 14px 16px;
     text-align: center;
+}
+
+.ebs-total-card-wide {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
 }
 
 .ebs-total-value {
@@ -2986,6 +3059,35 @@ body:not(.is-admin) #exportBtn { display: none !important; }
     text-transform: uppercase;
     letter-spacing: 0.04em;
     margin-top: 2px;
+}
+
+.ebs-type-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.ebs-type-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    background: var(--accent-subtle);
+    color: var(--accent-text);
+    border: 1px solid var(--accent-border);
+}
+
+.ebs-type-item .type-count {
+    font-weight: 800;
+}
+
+.ebs-type-item .type-name {
+    font-weight: 500;
+    opacity: 0.85;
 }
 
 /* ============================================
@@ -3045,6 +3147,86 @@ body:not(.is-admin) #exportBtn { display: none !important; }
 
 .gc-filter-row-searchable {
     flex-wrap: wrap;
+}
+
+/* ============================================
+   Re-include VM Selection Dialog
+   ============================================ */
+.reinclude-list {
+    max-height: 320px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 10px 0;
+    padding: 4px 0;
+}
+
+.reinclude-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+    font-size: 0.82rem;
+}
+
+.reinclude-item:hover {
+    background: var(--bg-hover);
+}
+
+.reinclude-item input[type="checkbox"] {
+    accent-color: var(--accent);
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
+.reinclude-name {
+    font-weight: 600;
+    color: var(--text-primary);
+    min-width: 120px;
+}
+
+.reinclude-host {
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    padding: 2px 6px;
+    border-radius: 4px;
+    flex: 1;
+}
+
+.reinclude-type {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    background: var(--bg-tertiary);
+    padding: 1px 7px;
+    border-radius: 10px;
+    white-space: nowrap;
+}
+
+.reinclude-select-all {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--accent-text);
+    cursor: pointer;
+    border-bottom: 1px solid var(--border-subtle);
+    margin-bottom: 4px;
+}
+
+.reinclude-select-all input[type="checkbox"] {
+    accent-color: var(--accent);
+    width: 16px;
+    height: 16px;
 }
 
 /* ============================================

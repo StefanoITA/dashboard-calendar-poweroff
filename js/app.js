@@ -95,6 +95,15 @@ const App = (() => {
         if (el) { el.classList.add('hidden'); setTimeout(() => el.remove(), 400); }
     }
 
+    function updateDynamoStatus(state) {
+        // state: 'online', 'connecting', 'offline', 'disabled'
+        const el = document.getElementById('dynamoStatus');
+        if (!el) return;
+        el.dataset.status = state;
+        const labels = { online: 'Online', connecting: 'Connessione...', offline: 'Offline', disabled: 'Locale' };
+        el.querySelector('.dynamo-label').textContent = labels[state] || state;
+    }
+
     function showGitHubLinkScreen() {
         const overlay = document.createElement('div');
         overlay.className = 'unauthorized-overlay';
@@ -298,8 +307,8 @@ const App = (() => {
         await DataManager.loadMessages();
         await DataManager.loadFromPath('data/machines.csv');
 
-        // Load EBS disks from localStorage
-        try { const saved = localStorage.getItem('finops_ebsDisks'); if (saved) ebsDisks = JSON.parse(saved); } catch {}
+        // Load EBS volumes from CSV
+        await DataManager.loadEBSVolumes();
 
 
         const users = DataManager.getUsers();
@@ -390,14 +399,21 @@ const App = (() => {
 
         // DynamoDB sync
         if (DynamoService.CONFIG.enabled) {
+            updateDynamoStatus('connecting');
             try {
                 await DataManager.loadFromDynamo();
+                updateDynamoStatus('online');
             } catch (err) {
+                updateDynamoStatus('offline');
                 showConnectionError();
                 return;
             }
         } else {
-            DynamoService.takeSnapshot(DataManager.getSchedulesRef());
+            // Restore saved snapshot from localStorage so unsaved changes survive reload
+            if (!DynamoService.restoreSnapshot()) {
+                DynamoService.takeSnapshot(DataManager.getSchedulesRef());
+            }
+            updateDynamoStatus('disabled');
         }
 
         renderAppList();
@@ -502,6 +518,7 @@ const App = (() => {
         $('#gcPrevMonth').addEventListener('click', () => navigateGeneralCalendar(-1));
         $('#gcNextMonth').addEventListener('click', () => navigateGeneralCalendar(1));
         $('#gcExportPdfBtn').addEventListener('click', exportGCToPdf);
+        $('#gcCopyTableBtn').addEventListener('click', copyGCTable);
         document.addEventListener('keydown', e => {
             if (e.key === 'Escape') { closeModal(); closeEnvPopover(); }
             if ((e.ctrlKey || e.metaKey) && e.key === 's') {
@@ -510,6 +527,8 @@ const App = (() => {
             }
         });
         window.addEventListener('beforeunload', (e) => {
+            // Don't warn during SSO login flow or unauthorized screens
+            if (isUnauthorized || !DataManager.getCurrentUser()) return;
             const changes = DynamoService.getModifiedAppEnvs(DataManager.getSchedulesRef());
             if (changes.length > 0) {
                 e.preventDefault();
@@ -575,15 +594,23 @@ const App = (() => {
             $('#logoutBtn').addEventListener('click', async () => {
                 const confirmed = await confirmDialog({
                     title: 'Conferma Logout',
-                    message: 'Vuoi disconnetterti dalla piattaforma?',
+                    message: 'Vuoi disconnetterti dalla piattaforma? Le note e i dati locali verranno mantenuti.',
                     confirmLabel: 'Logout',
                     iconType: 'warning',
                     confirmClass: 'btn-primary'
                 });
                 if (!confirmed) return;
+                // Clear SSO session but keep notes, schedules, etc
                 clearSSOSession();
                 localStorage.removeItem('shutdownScheduler_userId');
-                location.reload();
+                // Force OAuth re-login by redirecting to the OAuth authorize URL
+                // This ensures a new cookie/session is created (no auto-login)
+                if (SSO_CONFIG.enabled) {
+                    const authUrl = `${SSO_CONFIG.gheBaseUrl}/login/oauth/authorize?client_id=${SSO_CONFIG.oauthClientId}&scope=read:user`;
+                    window.location.href = authUrl;
+                } else {
+                    location.reload();
+                }
             });
         } else {
             // Local dev mode: show dropdown selector
@@ -1003,25 +1030,70 @@ const App = (() => {
                 }).join('');
             grid.parentNode.insertBefore(envGroupsContainer, grid);
 
-            // Re-include excluded VMs
+            // Re-include excluded VMs — selection dialog
             envGroupsContainer.querySelectorAll('.env-group-reinclude-btn').forEach(btn => {
                 btn.addEventListener('click', async () => {
                     const gid = btn.dataset.groupId;
                     const group = envGroups.find(g => g.groupId === gid);
                     if (!group) return;
-                    const confirmed = await confirmDialog({
-                        title: 'Re-includere server esclusi?',
-                        message: `Vuoi re-includere nella schedulazione ambiente i <strong>${group.totalMachines - group.hostnames.length}</strong> server precedentemente esclusi?`,
-                        confirmLabel: 'Re-includi',
-                        iconType: 'accent',
-                        confirmClass: 'btn-primary'
+
+                    // Find excluded machines
+                    const allMachines = DataManager.getMachines(appName, envName);
+                    const includedSet = new Set(group.hostnames);
+                    const excludedMachines = allMachines.filter(m => !includedSet.has(m.hostname));
+                    if (excludedMachines.length === 0) return;
+
+                    // Build checkbox list
+                    const checkboxesHtml = excludedMachines.map(m =>
+                        `<label class="reinclude-item">
+                            <input type="checkbox" value="${m.hostname}" checked>
+                            <span class="reinclude-name">${m.machine_name}</span>
+                            <code class="reinclude-host">${m.hostname}</code>
+                            <span class="reinclude-type">${m.server_type.replace(' Server','')}</span>
+                        </label>`
+                    ).join('');
+
+                    const result = await new Promise(resolve => {
+                        const overlay = document.createElement('div');
+                        overlay.className = 'confirm-overlay';
+                        overlay.innerHTML = `
+                            <div class="confirm-dialog confirm-dialog-wide">
+                                <div class="confirm-dialog-icon"><div class="icon-circle accent">${SVG.alert}</div></div>
+                                <div class="confirm-dialog-body">
+                                    <h4>Re-includi server nella schedulazione</h4>
+                                    <p>Seleziona i server da re-includere nella schedulazione ambiente:</p>
+                                    <div class="reinclude-list">${checkboxesHtml}</div>
+                                    <label class="reinclude-select-all"><input type="checkbox" id="reincludeSelectAll" checked> <strong>Seleziona/Deseleziona tutti</strong></label>
+                                </div>
+                                <div class="confirm-dialog-actions">
+                                    <button class="btn-secondary confirm-cancel">Annulla</button>
+                                    <button class="btn-primary confirm-ok">Re-includi selezionati</button>
+                                </div>
+                            </div>`;
+                        document.body.appendChild(overlay);
+
+                        // Select all toggle
+                        const selectAllCb = overlay.querySelector('#reincludeSelectAll');
+                        selectAllCb.addEventListener('change', () => {
+                            overlay.querySelectorAll('.reinclude-item input').forEach(cb => { cb.checked = selectAllCb.checked; });
+                        });
+
+                        const close = (val) => { overlay.remove(); resolve(val); };
+                        overlay.querySelector('.confirm-cancel').addEventListener('click', () => close(null));
+                        overlay.querySelector('.confirm-ok').addEventListener('click', () => {
+                            const selected = [...overlay.querySelectorAll('.reinclude-item input:checked')].map(cb => cb.value);
+                            close(selected);
+                        });
+                        overlay.addEventListener('click', e => { if (e.target === overlay) close(null); });
                     });
-                    if (!confirmed) return;
-                    DataManager.reincludeInEnvGroup(appName, envName, gid);
-                    AuditLog.log('Re-inclusi server in schedulazione ambiente', `${appName} / ${envName}`);
+
+                    if (!result || result.length === 0) return;
+
+                    DataManager.reincludeSpecificInEnvGroup(appName, envName, gid, result);
+                    AuditLog.log('Re-inclusi server', `${result.length} server in ${appName} / ${envName}`);
                     renderMachines(currentApp, currentEnv);
                     updateChangesBadge();
-                    showToast('Server re-inclusi nella schedulazione ambiente', 'success');
+                    showToast(`${result.length} server re-inclusi`, 'success');
                 });
             });
 
@@ -1722,18 +1794,14 @@ const App = (() => {
     // ============================================
     // PDF Export — General Calendar
     // ============================================
-    function exportGCToPdf() {
+    function buildGCDateMap() {
         const year = gcDate.getFullYear(), month = gcDate.getMonth();
-        const monthName = monthNames[month];
-
-        // Build schedule data for each day
         const allSchedules = DataManager.getAllSchedulesFlat().filter(s => gcActiveFilters.has(s.app) && gcActiveEnvFilters.has(s.env));
         const daysInMonth = new Date(year, month + 1, 0).getDate();
         const dateMap = {};
         for (let d = 1; d <= daysInMonth; d++) {
             dateMap[`${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`] = new Map();
         }
-
         const dowForDate = ds => new Date(ds + 'T00:00:00').getDay();
         allSchedules.forEach(({ app, env, entry }) => {
             const key = `${app} - ${env}`;
@@ -1748,24 +1816,32 @@ const App = (() => {
                 entry.dates.forEach(ds => addToDate(ds));
             }
         });
+        return dateMap;
+    }
 
+    function exportGCToPdf() {
+        const year = gcDate.getFullYear(), month = gcDate.getMonth();
+        const monthName = monthNames[month];
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        const dateMap = buildGCDateMap();
         const dayNames = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
 
-        // Build HTML for print
+        // Build HTML for direct download
         let html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>FinOps Platform - ${monthName} ${year}</title>
         <style>
-            @page { size: A4 landscape; margin: 15mm; }
-            body { font-family: Arial, sans-serif; font-size: 10px; color: #333; margin: 0; padding: 0; }
-            .header { text-align: center; margin-bottom: 12px; border-bottom: 2px solid #c2410c; padding-bottom: 8px; }
-            .header h1 { font-size: 18px; margin: 0; color: #c2410c; }
-            .header p { font-size: 11px; color: #666; margin: 4px 0 0; }
-            table { width: 100%; border-collapse: collapse; }
-            th { background: #f2f2f2; padding: 6px 4px; border: 1px solid #ccc; font-size: 9px; text-transform: uppercase; }
-            td { padding: 4px; border: 1px solid #ddd; vertical-align: top; min-height: 50px; width: 14.28%; }
-            .day-num { font-weight: bold; font-size: 11px; margin-bottom: 2px; }
-            .day-weekend { background: #fafafa; }
-            .tag { display: inline-block; font-size: 7px; padding: 1px 3px; border-radius: 2px; margin: 1px 0; background: #e8f0fe; color: #1a56db; white-space: nowrap; }
-            .footer { text-align: center; font-size: 8px; color: #999; margin-top: 8px; }
+            @page { size: A4 landscape; margin: 10mm; }
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { font-family: Arial, Helvetica, sans-serif; font-size: 9px; color: #333; width: 100%; }
+            .header { text-align: center; margin-bottom: 10px; border-bottom: 2px solid #c2410c; padding-bottom: 6px; }
+            .header h1 { font-size: 16px; margin: 0; color: #c2410c; }
+            .header p { font-size: 10px; color: #666; margin: 3px 0 0; }
+            table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+            th { background: #f2f2f2; padding: 5px 3px; border: 1px solid #bbb; font-size: 8px; text-transform: uppercase; text-align: center; }
+            td { padding: 3px; border: 1px solid #ddd; vertical-align: top; height: 55px; overflow: hidden; word-wrap: break-word; }
+            .day-num { font-weight: bold; font-size: 10px; margin-bottom: 2px; }
+            .day-weekend { background: #f7f7f7; }
+            .tag { display: block; font-size: 6.5px; padding: 1px 2px; border-radius: 1px; margin: 1px 0; background: #e8f0fe; color: #1a56db; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .footer { text-align: center; font-size: 7px; color: #999; margin-top: 6px; }
             .empty { background: #f9f9f9; }
         </style></head><body>
         <div class="header">
@@ -1773,12 +1849,11 @@ const App = (() => {
             <p>${monthName} ${year} &bull; Generato il ${new Date().toLocaleDateString('it-IT')}</p>
         </div>
         <table>
-            <thead><tr><th>Luned&igrave;</th><th>Marted&igrave;</th><th>Mercoled&igrave;</th><th>Gioved&igrave;</th><th>Venerd&igrave;</th><th>Sabato</th><th>Domenica</th></tr></thead>
+            <thead><tr><th>Lun</th><th>Mar</th><th>Mer</th><th>Gio</th><th>Ven</th><th>Sab</th><th>Dom</th></tr></thead>
             <tbody>`;
 
         let startDow = new Date(year, month, 1).getDay();
         startDow = startDow === 0 ? 6 : startDow - 1;
-
         let dayCounter = 1;
         const totalCells = Math.ceil((startDow + daysInMonth) / 7) * 7;
 
@@ -1792,9 +1867,7 @@ const App = (() => {
                 const isWeekend = date.getDay() === 0 || date.getDay() === 6;
                 const entries = dateMap[ds] || new Map();
                 let tagsHtml = '';
-                entries.forEach((count, key) => {
-                    tagsHtml += `<div class="tag">${key} (${count})</div>`;
-                });
+                entries.forEach((count, key) => { tagsHtml += `<div class="tag">${key} (${count})</div>`; });
                 html += `<td class="${isWeekend ? 'day-weekend' : ''}"><div class="day-num">${dayCounter} ${dayNames[date.getDay()]}</div>${tagsHtml}</td>`;
                 dayCounter++;
             }
@@ -1802,16 +1875,66 @@ const App = (() => {
         }
 
         html += '</tbody></table>';
-        html += `<div class="footer">FinOps Platform &bull; ${monthName} ${year}</div>`;
-        html += '</body></html>';
+        html += `<div class="footer">FinOps Platform &bull; ${monthName} ${year}</div></body></html>`;
 
-        // Open in new window and trigger print (generates PDF)
-        const printWindow = window.open('', '_blank');
-        printWindow.document.write(html);
-        printWindow.document.close();
-        printWindow.onload = () => { printWindow.print(); };
-        AuditLog.log('Esportazione PDF', `Calendario Generale — ${monthName} ${year}`);
-        showToast('PDF in fase di generazione...', 'info');
+        // Download as HTML file (user can open/print/save as PDF)
+        const blob = new Blob([html], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `FinOps-Calendario-${monthName}-${year}.html`;
+        a.click();
+        URL.revokeObjectURL(url);
+        AuditLog.log('Esportazione Calendario', `${monthName} ${year}`);
+        showToast('Calendario scaricato', 'success');
+    }
+
+    function copyGCTable() {
+        const year = gcDate.getFullYear(), month = gcDate.getMonth();
+        const monthName = monthNames[month];
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        const dateMap = buildGCDateMap();
+        const dayNames = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
+
+        // Build a clean day-by-day list, easy to read in email
+        let lines = [];
+        lines.push(`CALENDARIO SHUTDOWN — ${monthName} ${year}`);
+        lines.push('');
+
+        let htmlTable = `<table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:11px;">`;
+        htmlTable += `<tr style="background:#c2410c;color:white;"><th colspan="3" style="padding:8px;font-size:13px;text-align:center;border:1px solid #999;">Calendario Shutdown &mdash; ${monthName} ${year}</th></tr>`;
+        htmlTable += `<tr style="background:#f2f2f2;"><th style="padding:6px 10px;border:1px solid #ccc;text-align:left;width:120px;">Giorno</th><th style="padding:6px 10px;border:1px solid #ccc;text-align:left;">Schedulazioni attive</th><th style="padding:6px 10px;border:1px solid #ccc;text-align:center;width:60px;">Server</th></tr>`;
+
+        for (let d = 1; d <= daysInMonth; d++) {
+            const ds = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+            const date = new Date(year, month, d);
+            const entries = dateMap[ds] || new Map();
+            if (entries.size === 0) continue;
+
+            const dayLabel = `${dayNames[date.getDay()]} ${d} ${monthName}`;
+            const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+            let totalServers = 0;
+            let entryParts = [];
+            entries.forEach((count, key) => { entryParts.push(`${key} (${count})`); totalServers += count; });
+
+            lines.push(`${dayLabel}: ${entryParts.join(', ')} — ${totalServers} server`);
+            const bgStyle = isWeekend ? 'background:#f9f9f9;' : '';
+            htmlTable += `<tr style="${bgStyle}"><td style="padding:4px 10px;border:1px solid #ddd;font-weight:600;">${dayLabel}</td><td style="padding:4px 10px;border:1px solid #ddd;">${entryParts.join('<br>')}</td><td style="padding:4px 10px;border:1px solid #ddd;text-align:center;font-weight:600;">${totalServers}</td></tr>`;
+        }
+        htmlTable += '</table>';
+
+        const text = lines.join('\n');
+        try {
+            navigator.clipboard.write([
+                new ClipboardItem({
+                    'text/html': new Blob([htmlTable], { type: 'text/html' }),
+                    'text/plain': new Blob([text], { type: 'text/plain' })
+                })
+            ]);
+            showToast('Tabella calendario copiata', 'success');
+        } catch {
+            navigator.clipboard.writeText(text).then(() => showToast('Tabella copiata (testo)', 'success')).catch(() => showToast('Errore nella copia', 'error'));
+        }
     }
 
     // ============================================
@@ -2110,8 +2233,6 @@ const App = (() => {
     // ============================================
     // EBS Disk List View
     // ============================================
-    let ebsDisks = [];
-
     function showEBSList() {
         currentApp = null;
         currentEnv = null;
@@ -2130,23 +2251,21 @@ const App = (() => {
         const ebsView = document.getElementById('ebsListView');
         if (!ebsView) return;
 
-        const allDisks = ebsDisks;
-        const apps = [...new Set(allDisks.map(d => d.application))].sort();
-        const envs = [...new Set(allDisks.map(d => d.environment))].sort();
+        const allDisks = DataManager.getEBSVolumes();
+        const apps = [...new Set(allDisks.map(d => d.application).filter(Boolean))].sort();
+        const envs = [...new Set(allDisks.map(d => d.environment).filter(Boolean))].sort();
         const activeApps = new Set();
         const activeEnvs = new Set();
         let sortCol = null, sortAsc = true;
         let lastFiltered = allDisks;
 
-        // Totals calculation
-        const calcTotals = (disks) => {
-            const totalSize = disks.reduce((s, d) => s + (parseFloat(d.size_gb) || 0), 0);
-            const totalIops = disks.reduce((s, d) => s + (parseInt(d.iops) || 0), 0);
-            const totalThroughput = disks.reduce((s, d) => s + (parseFloat(d.throughput) || 0), 0);
-            return { count: disks.length, totalSize, totalIops, totalThroughput };
+        // Type breakdown
+        const calcTypeCounts = (disks) => {
+            const types = {};
+            disks.forEach(d => { const t = d.volume_type || 'unknown'; types[t] = (types[t] || 0) + 1; });
+            return types;
         };
-
-        const isAdmin = DataManager.getCurrentUser()?.role === 'Admin';
+        const calcTotalSize = (disks) => disks.reduce((s, d) => s + (parseFloat(d.size_gb) || 0), 0);
 
         ebsView.innerHTML = `
             <div class="vm-list-header">
@@ -2156,10 +2275,6 @@ const App = (() => {
                         <div class="vm-list-subtitle">${allDisks.length} volumi totali</div>
                     </div>
                     <div class="vm-list-actions">
-                        ${isAdmin ? `<button class="btn-secondary" id="ebsImportBtn">
-                            ${SVG.upload} Importa CSV Dischi
-                        </button>
-                        <input type="file" id="ebsCsvInput" accept=".csv" style="display:none">` : ''}
                         <button class="btn-secondary vm-copy-btn" id="ebsCopyAll">
                             ${SVG.copy} Copia elenco visibile
                         </button>
@@ -2201,17 +2316,18 @@ const App = (() => {
             </div>`;
 
         if (allDisks.length === 0) {
-            ebsView.querySelector('#ebsListBody').innerHTML = `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-tertiary);">Nessun disco importato. ${isAdmin ? 'Usa "Importa CSV Dischi" per caricare i dati.' : 'Contattare un amministratore per importare i dati.'}</td></tr>`;
+            ebsView.querySelector('#ebsListBody').innerHTML = `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-tertiary);">Nessun volume EBS trovato. Aggiungere i dati nel file <code>data/ebs_volumes.csv</code>.</td></tr>`;
         }
 
         const renderTotals = (disks) => {
-            const t = calcTotals(disks);
             const fmt = n => n.toLocaleString('it-IT');
+            const totalSize = calcTotalSize(disks);
+            const types = calcTypeCounts(disks);
+            const typeStr = Object.entries(types).sort((a,b) => b[1] - a[1]).map(([t, c]) => `<span class="ebs-type-item">${c} <strong>${t}</strong></span>`).join('');
             ebsView.querySelector('#ebsTotals').innerHTML = `
-                <div class="ebs-total-card"><div class="ebs-total-value">${fmt(t.count)}</div><div class="ebs-total-label">Volumi</div></div>
-                <div class="ebs-total-card"><div class="ebs-total-value">${fmt(Math.round(t.totalSize))}</div><div class="ebs-total-label">GB Totali</div></div>
-                <div class="ebs-total-card"><div class="ebs-total-value">${fmt(t.totalIops)}</div><div class="ebs-total-label">IOPS Totali</div></div>
-                <div class="ebs-total-card"><div class="ebs-total-value">${fmt(Math.round(t.totalThroughput))}</div><div class="ebs-total-label">Throughput Tot.</div></div>`;
+                <div class="ebs-total-card"><div class="ebs-total-value">${fmt(disks.length)}</div><div class="ebs-total-label">Volumi</div></div>
+                <div class="ebs-total-card"><div class="ebs-total-value">${fmt(Math.round(totalSize))}</div><div class="ebs-total-label">GB Totali</div></div>
+                <div class="ebs-total-card ebs-total-card-wide"><div class="ebs-total-label" style="margin-bottom:4px;">Tipi di disco</div><div class="ebs-type-list">${typeStr || '<span style="color:var(--text-tertiary);">—</span>'}</div></div>`;
         };
 
         const renderFilterChips = () => {
@@ -2299,36 +2415,6 @@ const App = (() => {
             });
         };
 
-        // EBS CSV import
-        if (isAdmin) {
-            ebsView.querySelector('#ebsImportBtn').addEventListener('click', () => ebsView.querySelector('#ebsCsvInput').click());
-            ebsView.querySelector('#ebsCsvInput').addEventListener('change', (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = (ev) => {
-                    const lines = ev.target.result.trim().split('\n');
-                    if (lines.length < 2) { showToast('CSV vuoto o non valido', 'error'); return; }
-                    const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/\s+/g, '_'));
-                    const parsed = [];
-                    for (let i = 1; i < lines.length; i++) {
-                        const vals = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
-                        if (vals.length < headers.length) continue;
-                        const obj = {};
-                        headers.forEach((h, idx) => { obj[h] = vals[idx]; });
-                        parsed.push(obj);
-                    }
-                    ebsDisks = parsed;
-                    try { localStorage.setItem('finops_ebsDisks', JSON.stringify(ebsDisks)); } catch {}
-                    AuditLog.log('Import CSV Dischi', `${parsed.length} volumi importati`);
-                    renderEBSList();
-                    showToast(`${parsed.length} volumi EBS importati`, 'success');
-                };
-                reader.readAsText(file);
-                e.target.value = '';
-            });
-        }
-
         // Copy
         ebsView.querySelector('#ebsCopyAll').addEventListener('click', async () => {
             if (lastFiltered.length === 0) { showToast('Nessun dato da copiare', 'info'); return; }
@@ -2411,11 +2497,15 @@ const App = (() => {
         try {
             await DataManager.loadFromPath('data/machines.csv');
             await DataManager.loadMessages();
+            await DataManager.loadEBSVolumes();
             if (DynamoService.CONFIG.enabled) {
+                updateDynamoStatus('connecting');
+                // DynamoDB is authoritative: discard local changes, load fresh from DynamoDB
                 await DataManager.loadFromDynamo();
-            } else {
-                DynamoService.takeSnapshot(DataManager.getSchedulesRef());
+                updateDynamoStatus('online');
             }
+            // Always re-snapshot after refresh (DynamoDB state or local state becomes the new baseline)
+            DynamoService.takeSnapshot(DataManager.getSchedulesRef());
             renderAppList();
             renderVMListButton();
             renderHomeDashboard();
@@ -2437,6 +2527,7 @@ const App = (() => {
             showToast('Stato aggiornato', 'success');
         } catch (err) {
             console.error('[Refresh] Error:', err);
+            if (DynamoService.CONFIG.enabled) updateDynamoStatus('offline');
             showToast('Errore durante l\'aggiornamento: ' + (err.message || 'Riprova'), 'error');
         } finally {
             isRefreshing = false;
