@@ -28,9 +28,14 @@
     </style>
     <script>
         // Apply saved theme IMMEDIATELY to preloader (before body renders)
+        // Default: dark mode (unless explicitly set to light)
         (function() {
             var t = localStorage.getItem('shutdownScheduler_theme');
-            if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+            if (t === 'light') {
+                document.documentElement.removeAttribute('data-theme');
+            } else {
+                document.documentElement.setAttribute('data-theme', 'dark');
+            }
         })();
     </script>
 </head>
@@ -40,10 +45,10 @@
         <div class="preloader-spinner"></div>
     </div>
     <script>
-        // Match preloader to saved theme instantly
+        // Match preloader to saved theme instantly (default: dark)
         (function() {
             var t = localStorage.getItem('shutdownScheduler_theme');
-            if (t === 'dark') document.getElementById('preloader').classList.add('dark');
+            if (t !== 'light') document.getElementById('preloader').classList.add('dark');
             // Safety: auto-hide preloader after 8 seconds no matter what
             setTimeout(function() {
                 var p = document.getElementById('preloader');
