@@ -238,6 +238,68 @@ def _error_redirect(redirect_url, error_msg):
     return _redirect(f"{redirect_url}?ghuser_error={urllib.parse.quote(safe_msg)}")
 
 
+def _extract_query_params(event):
+    """Estrae query parameters da TUTTE le possibili sorgenti nell'evento Lambda.
+
+    Supporta:
+    - API Gateway v1 REST API  → queryStringParameters
+    - API Gateway v2 HTTP API  → queryStringParameters, rawQueryString
+    - Lambda Function URL      → queryStringParameters, rawQueryString
+    - ALB                      → queryStringParameters, multiValueQueryStringParameters
+    - Fallback                 → rawPath con ?query
+    """
+    # 1. Sorgente standard: queryStringParameters (dict)
+    params = event.get("queryStringParameters")
+    if params and isinstance(params, dict) and len(params) > 0:
+        _log("DEBUG", "Query params da queryStringParameters", params_keys=list(params.keys()))
+        return params
+
+    # 2. rawQueryString (Lambda Function URL / HTTP API v2) — es. "code=abc123&state=xyz"
+    raw_qs = event.get("rawQueryString", "")
+    if raw_qs:
+        parsed = urllib.parse.parse_qs(raw_qs, keep_blank_values=True)
+        result = {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
+        _log("INFO", "Query params da rawQueryString", raw=raw_qs, parsed_keys=list(result.keys()))
+        return result
+
+    # 3. multiValueQueryStringParameters (API Gateway v1 / ALB)
+    multi = event.get("multiValueQueryStringParameters")
+    if multi and isinstance(multi, dict) and len(multi) > 0:
+        result = {k: v[0] if isinstance(v, list) and len(v) == 1 else v for k, v in multi.items()}
+        _log("INFO", "Query params da multiValueQueryStringParameters", parsed_keys=list(result.keys()))
+        return result
+
+    # 4. Fallback: prova a estrarre da rawPath o path
+    for path_key in ("rawPath", "path", "resource"):
+        path_val = event.get(path_key, "")
+        if "?" in str(path_val):
+            qs = str(path_val).split("?", 1)[1]
+            parsed = urllib.parse.parse_qs(qs, keep_blank_values=True)
+            result = {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
+            _log("INFO", f"Query params da {path_key} (fallback)", raw=qs, parsed_keys=list(result.keys()))
+            return result
+
+    # 5. Ultimo tentativo: requestContext.http.path (API Gateway v2)
+    http_ctx = event.get("requestContext", {}).get("http", {})
+    raw_path = http_ctx.get("path", "")
+    if "?" in raw_path:
+        qs = raw_path.split("?", 1)[1]
+        parsed = urllib.parse.parse_qs(qs, keep_blank_values=True)
+        result = {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
+        _log("INFO", "Query params da requestContext.http.path (fallback)", parsed_keys=list(result.keys()))
+        return result
+
+    _log("WARN", "Nessun query parameter trovato in nessuna sorgente",
+         has_queryStringParameters=("queryStringParameters" in event),
+         queryStringParameters_value=str(event.get("queryStringParameters"))[:100],
+         has_rawQueryString=("rawQueryString" in event),
+         rawQueryString_value=str(event.get("rawQueryString", ""))[:100],
+         has_rawPath=("rawPath" in event),
+         rawPath_value=str(event.get("rawPath", ""))[:100],
+         has_multiValue=("multiValueQueryStringParameters" in event))
+    return {}
+
+
 # ============================================
 # Handler principale
 # ============================================
@@ -247,7 +309,15 @@ def lambda_handler(event, context):
 
     # Log evento completo (senza body per non esporre token)
     safe_event = {k: v for k, v in event.items() if k != "body"}
-    _log("INFO", "Lambda invocata", event_keys=list(event.keys()),
+    _log("INFO", "Lambda invocata",
+         event_keys=list(event.keys()),
+         queryStringParameters=str(event.get("queryStringParameters"))[:200],
+         rawQueryString=event.get("rawQueryString", "N/A"),
+         rawPath=event.get("rawPath", "N/A"),
+         path=event.get("path", "N/A"),
+         httpMethod=event.get("httpMethod", "N/A"),
+         requestContext_http=event.get("requestContext", {}).get("http", {}),
+         isBase64Encoded=event.get("isBase64Encoded", "N/A"),
          event=safe_event)
 
     # Valida configurazione
@@ -298,13 +368,15 @@ def _handle_oauth(event):
         _log("ERROR", "REDIRECT_URL non configurato")
         return _json_response(500, {"error": "REDIRECT_URL non configurato"})
 
-    params = event.get("queryStringParameters") or {}
+    params = _extract_query_params(event)
     code = params.get("code")
     state = params.get("state")
 
     _log("INFO", "OAuth GET ricevuto",
          has_code=bool(code), has_state=bool(state),
-         params_keys=list(params.keys()))
+         code_preview=code[:8] + "..." if code else "null",
+         params_keys=list(params.keys()),
+         params=params)
 
     if not code:
         _log("WARN", "Parametro 'code' mancante", params=params)

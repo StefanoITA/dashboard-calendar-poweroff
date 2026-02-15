@@ -303,14 +303,9 @@ const App = (() => {
     // ============================================
     async function init() {
         initTheme();
+
+        // Load only users first (needed for SSO matching)
         await DataManager.loadUsers();
-        await DataManager.loadMessages();
-        await DataManager.loadFromPath('data/machines.csv');
-
-        // Load EBS volumes from CSV
-        await DataManager.loadEBSVolumes();
-
-
         const users = DataManager.getUsers();
 
         // SSO Authentication via OAuth + Token HMAC
@@ -396,6 +391,11 @@ const App = (() => {
 
         renderUserSelector();
         applyRoleMode();
+
+        // Load data AFTER authentication (never fetch before login)
+        await DataManager.loadMessages();
+        await DataManager.loadFromPath('data/machines.csv');
+        await DataManager.loadEBSVolumes();
 
         // DynamoDB sync
         if (DynamoService.CONFIG.enabled) {
@@ -2400,9 +2400,9 @@ const App = (() => {
                 const eColor = envColors[d.environment] || '#7a7a96';
                 return `<tr>
                     <td class="vm-cell-hostname vm-cell-copyable" data-copy="${d.volume_id}" title="Clicca per copiare"><code>${d.volume_id}</code> <span class="vm-copy-hint">${SVG.copy}</span></td>
-                    <td style="text-align:right;font-weight:600;">${fmt(d.size_gb || 0)}</td>
-                    <td style="text-align:right;">${fmt(d.iops || 0)}</td>
-                    <td style="text-align:right;">${fmt(d.throughput || 0)}</td>
+                    <td style="font-weight:600;">${fmt(d.size_gb || 0)}</td>
+                    <td>${fmt(d.iops || 0)}</td>
+                    <td>${fmt(d.throughput || 0)}</td>
                     <td><code class="vm-instance-code">${d.volume_type || '-'}</code></td>
                     <td class="vm-cell-app">${d.application || '-'}</td>
                     <td class="vm-cell-env"><span class="vm-env-badge" style="background:${eColor}14;color:${eColor};border-color:${eColor}30">${d.environment || '-'}</span></td>
