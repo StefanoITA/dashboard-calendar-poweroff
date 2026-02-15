@@ -192,6 +192,25 @@ const DataManager = (() => {
     }
 
     // ============================================
+    // EBS Volumes
+    // ============================================
+    let ebsVolumes = [];
+
+    async function loadEBSVolumes() {
+        try {
+            const response = await fetch(cacheBust('data/ebs_volumes.csv'));
+            const text = await response.text();
+            ebsVolumes = parseCSV(text);
+        } catch (e) {
+            console.warn('Could not load ebs_volumes.csv', e);
+            ebsVolumes = [];
+        }
+        return ebsVolumes;
+    }
+
+    function getEBSVolumes() { return ebsVolumes; }
+
+    // ============================================
     // System Messages
     // ============================================
     async function loadMessages() {
@@ -241,6 +260,12 @@ const DataManager = (() => {
         }
 
         if (hasAnyData) {
+            // DynamoDB is authoritative — clear local schedules for these app/envs,
+            // then replace with DynamoDB data (no merge, no duplication)
+            for (const pair of pairs) {
+                const prefix = `${pair.app}|${pair.env}|`;
+                Object.keys(schedules).forEach(k => { if (k.startsWith(prefix)) delete schedules[k]; });
+            }
             for (const pair of pairs) {
                 const dynKey = DynamoService.appEnvKey(pair.app, pair.env);
                 if (items[dynKey]) {
@@ -249,6 +274,7 @@ const DataManager = (() => {
             }
             saveSchedulesToStorage();
         } else {
+            // DynamoDB is empty — push local state as initial seed
             for (const pair of pairs) {
                 const data = DynamoService.extractAppEnvData(schedules, pair.app, pair.env);
                 if (Object.keys(data).length > 0) {
@@ -397,6 +423,10 @@ const DataManager = (() => {
     }
 
     function reincludeInEnvGroup(appName, envName, groupId) {
+        reincludeSpecificInEnvGroup(appName, envName, groupId, null);
+    }
+
+    function reincludeSpecificInEnvGroup(appName, envName, groupId, hostnames) {
         const ms = getMachines(appName, envName);
         // Find an existing entry from this group to clone
         let templateEntry = null;
@@ -407,8 +437,10 @@ const DataManager = (() => {
             if (match) { templateEntry = match; break; }
         }
         if (!templateEntry) return;
-        // Add the entry to all machines that don't have it
+        // Add entry to specified machines (or all if hostnames is null)
+        const targetSet = hostnames ? new Set(hostnames) : null;
         ms.forEach(m => {
+            if (targetSet && !targetSet.has(m.hostname)) return;
             const key = scheduleKey(appName, envName, m.hostname);
             const entries = schedules[key] || [];
             if (!entries.find(e => e.envGroupId === groupId)) {
@@ -667,8 +699,10 @@ const DataManager = (() => {
         exportSchedules, getAllSchedulesFlat, getStats, envHasSchedules, getEnvScheduleStats,
         getSchedulesRef, getMessages, getUpcomingSchedules,
         getNotes, addNote, updateNote, deleteNote, getAllNotesCount,
-        getEnvGroups, updateEnvGroup, removeEnvGroup, excludeFromEnvGroup, reincludeInEnvGroup,
+        getEnvGroups, updateEnvGroup, removeEnvGroup, excludeFromEnvGroup,
+        reincludeInEnvGroup, reincludeSpecificInEnvGroup,
         isGlobalReadOnly, canViewVMList, getVMListMachines, generateCronjobs,
+        loadEBSVolumes, getEBSVolumes,
         get machines() { return machines; }
     };
 })();

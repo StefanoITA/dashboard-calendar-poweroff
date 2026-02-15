@@ -124,6 +124,17 @@ const DynamoService = (() => {
     // Take a deep snapshot of current schedules state
     function takeSnapshot(schedules) {
         initialSnapshot = JSON.parse(JSON.stringify(schedules));
+        // Persist snapshot to localStorage so it survives page reloads
+        try { localStorage.setItem('finops_lastSavedSnapshot', JSON.stringify(initialSnapshot)); } catch {}
+    }
+
+    // Restore snapshot from localStorage (for page reload resilience)
+    function restoreSnapshot() {
+        try {
+            const saved = localStorage.getItem('finops_lastSavedSnapshot');
+            if (saved) { initialSnapshot = JSON.parse(saved); return true; }
+        } catch {}
+        return false;
     }
 
     function getSnapshot() { return initialSnapshot; }
@@ -172,6 +183,6 @@ const DynamoService = (() => {
     return {
         CONFIG, appEnvKey, extractAppEnvData, mergeIntoSchedules,
         fetchAll, saveOne, saveMultiple,
-        takeSnapshot, getSnapshot, getModifiedAppEnvs
+        takeSnapshot, restoreSnapshot, getSnapshot, getModifiedAppEnvs
     };
 })();
