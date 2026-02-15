@@ -537,6 +537,7 @@ const App = (() => {
             }
         });
         document.addEventListener('mouseleave', (e) => {
+            if (isUnauthorized || !DataManager.getCurrentUser()) return;
             if (e.clientY <= 0) {
                 const changes = DynamoService.getModifiedAppEnvs(DataManager.getSchedulesRef());
                 if (changes.length > 0 && !unsavedPopupShown) {
@@ -2845,15 +2846,6 @@ const App = (() => {
             }
         }
     })();
-
-    // Prevent data loss on page reload
-    window.addEventListener('beforeunload', (e) => {
-        const changes = DynamoService.getModifiedAppEnvs(DataManager.getSchedulesRef());
-        if (changes.length > 0) {
-            e.preventDefault();
-            e.returnValue = 'Hai modifiche non salvate. Vuoi davvero uscire?';
-        }
-    });
 
     // Scripts are loaded dynamically after DOMContentLoaded already fired,
     // so we must check readyState and call init() directly if DOM is ready.
