@@ -198,7 +198,12 @@ const App = (() => {
     // ============================================
     function initTheme() {
         const saved = localStorage.getItem('shutdownScheduler_theme');
-        if (saved === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+        // Default: dark mode (if nothing saved)
+        if (saved === 'light') {
+            document.documentElement.removeAttribute('data-theme');
+        } else {
+            document.documentElement.setAttribute('data-theme', 'dark');
+        }
     }
 
     function toggleTheme() {
@@ -604,14 +609,8 @@ const App = (() => {
                 // Clear SSO session but keep notes, schedules, etc
                 clearSSOSession();
                 localStorage.removeItem('shutdownScheduler_userId');
-                // Force OAuth re-login by redirecting to the OAuth authorize URL
-                // This ensures a new cookie/session is created (no auto-login)
-                if (SSO_CONFIG.enabled) {
-                    const authUrl = `${SSO_CONFIG.gheBaseUrl}/login/oauth/authorize?client_id=${SSO_CONFIG.oauthClientId}&scope=read:user`;
-                    window.location.href = authUrl;
-                } else {
-                    location.reload();
-                }
+                // Reload to show login screen (no auto-login)
+                location.reload();
             });
         } else {
             // Local dev mode: show dropdown selector
