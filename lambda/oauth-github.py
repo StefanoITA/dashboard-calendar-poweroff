@@ -26,6 +26,7 @@ import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
+from typing import Optional, Dict, Any
 
 
 # ============================================
@@ -40,6 +41,8 @@ CORS_ORIGIN = f"{_parsed.scheme}://{_parsed.netloc}" if _parsed and _parsed.sche
 TRANSIT_TTL = 300       # 5 minuti
 SESSION_TTL = 28800     # 8 ore
 HTTP_TIMEOUT = 15       # secondi per richieste a GHE
+MAX_RETRIES = 3         # numero massimo di retry per richieste a GHE
+RETRY_BACKOFF = 2       # moltiplicatore per backoff esponenziale
 
 
 # ============================================
@@ -139,8 +142,8 @@ def _get_ssl_context():
     return None
 
 
-def _http_request(url, data=None, headers=None, method="GET"):
-    """Esegue richiesta HTTP con gestione errori completa."""
+def _http_request(url, data=None, headers=None, method="GET", max_retries=MAX_RETRIES):
+    """Esegue richiesta HTTP con gestione errori completa e retry automatico."""
     headers = headers or {}
     log_url = url.split("?")[0]  # non loggare query string con secrets
 
@@ -149,65 +152,93 @@ def _http_request(url, data=None, headers=None, method="GET"):
         headers.setdefault("Content-Type", "application/json")
     headers.setdefault("Accept", "application/json")
 
-    _log("DEBUG", "HTTP request", method=method, url=log_url,
-         has_data=data is not None, headers_keys=list(headers.keys()))
+    last_exception = None
 
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    ctx = _get_ssl_context()
+    for attempt in range(max_retries):
+        try:
+            _log("DEBUG", "HTTP request", method=method, url=log_url,
+                 has_data=data is not None, headers_keys=list(headers.keys()),
+                 attempt=attempt + 1, max_retries=max_retries)
 
-    try:
-        with urllib.request.urlopen(req, context=ctx, timeout=HTTP_TIMEOUT) as resp:
-            status = resp.status
-            raw = resp.read().decode("utf-8")
-            _log("DEBUG", "HTTP response", status=status, body_length=len(raw),
-                 body_preview=raw[:300])
+            req = urllib.request.Request(url, data=data, headers=headers, method=method)
+            ctx = _get_ssl_context()
 
-            # GHE token endpoint può ritornare form-encoded (access_token=xxx&token_type=bearer)
-            # anche con Accept: application/json su alcune versioni
-            if raw.startswith("{") or raw.startswith("["):
-                return json.loads(raw)
-            elif "=" in raw and "&" in raw:
-                _log("INFO", "Risposta form-encoded, parsing come query string")
-                parsed = urllib.parse.parse_qs(raw, keep_blank_values=True)
-                return {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
-            else:
-                # Prova JSON comunque
-                return json.loads(raw)
+            with urllib.request.urlopen(req, context=ctx, timeout=HTTP_TIMEOUT) as resp:
+                status = resp.status
+                raw = resp.read().decode("utf-8")
+                _log("DEBUG", "HTTP response", status=status, body_length=len(raw),
+                     body_preview=raw[:300], attempt=attempt + 1)
 
-    except urllib.error.HTTPError as e:
+                # GHE token endpoint può ritornare form-encoded (access_token=xxx&token_type=bearer)
+                # anche con Accept: application/json su alcune versioni
+                if raw.startswith("{") or raw.startswith("["):
+                    return json.loads(raw)
+                elif "=" in raw and "&" in raw:
+                    _log("INFO", "Risposta form-encoded, parsing come query string")
+                    parsed = urllib.parse.parse_qs(raw, keep_blank_values=True)
+                    return {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
+                else:
+                    # Prova JSON comunque
+                    return json.loads(raw)
+
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", errors="replace")
+            except Exception:
+                pass
+
+            # Non fare retry per errori client (4xx) tranne 429 (rate limit)
+            if 400 <= e.code < 500 and e.code != 429:
+                _log("ERROR", "HTTP error da GHE (no retry)", status=e.code,
+                     reason=str(e.reason), url=log_url, response_body=body[:500])
+                raise RuntimeError(f"GHE HTTP {e.code}: {e.reason} — {body[:200]}") from e
+
+            last_exception = e
+            _log("WARN", f"HTTP error da GHE (attempt {attempt + 1}/{max_retries})",
+                 status=e.code, reason=str(e.reason), url=log_url,
+                 response_body=body[:500])
+
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            last_exception = e
+            error_msg = str(getattr(e, 'reason', e))
+            _log("WARN", f"Errore di rete/timeout (attempt {attempt + 1}/{max_retries})",
+                 url=log_url, error=error_msg, error_type=type(e).__name__)
+
+        except json.JSONDecodeError as e:
+            # Errore di parsing JSON - non fare retry
+            _log("ERROR", "Risposta GHE non è JSON valido", url=log_url, error=str(e))
+            raise RuntimeError(f"Risposta GHE non parsabile: {e}") from e
+
+        # Se non è l'ultimo tentativo, aspetta con backoff esponenziale
+        if attempt < max_retries - 1:
+            wait_time = RETRY_BACKOFF ** attempt
+            _log("INFO", f"Retry dopo {wait_time}s", attempt=attempt + 1,
+                 max_retries=max_retries, wait_seconds=wait_time)
+            time.sleep(wait_time)
+
+    # Tutti i retry falliti
+    if isinstance(last_exception, urllib.error.HTTPError):
         body = ""
         try:
-            body = e.read().decode("utf-8", errors="replace")
+            body = last_exception.read().decode("utf-8", errors="replace")
         except Exception:
             pass
-        _log("ERROR", "HTTP error da GHE",
-             status=e.code, reason=str(e.reason),
-             url=log_url, response_body=body[:500])
+        _log("ERROR", "HTTP error da GHE (tutti i retry falliti)",
+             status=last_exception.code, reason=str(last_exception.reason),
+             url=log_url, response_body=body[:500], total_attempts=max_retries)
         raise RuntimeError(
-            f"GHE HTTP {e.code}: {e.reason} — {body[:200]}"
-        ) from e
-
-    except urllib.error.URLError as e:
-        _log("ERROR", "Errore di rete/SSL verso GHE",
-             url=log_url, error=str(e.reason),
-             error_type=type(e.reason).__name__)
+            f"GHE HTTP {last_exception.code} dopo {max_retries} tentativi: {last_exception.reason} — {body[:200]}"
+        ) from last_exception
+    elif isinstance(last_exception, (urllib.error.URLError, TimeoutError, ConnectionError)):
+        error_msg = str(getattr(last_exception, 'reason', last_exception))
+        _log("ERROR", "Errore di rete/timeout (tutti i retry falliti)",
+             url=log_url, error=error_msg, total_attempts=max_retries)
         raise RuntimeError(
-            f"Errore rete GHE: {e.reason}"
-        ) from e
-
-    except TimeoutError:
-        _log("ERROR", "Timeout HTTP verso GHE",
-             url=log_url, timeout_seconds=HTTP_TIMEOUT)
-        raise RuntimeError(
-            f"Timeout {HTTP_TIMEOUT}s contattando GHE"
-        ) from None
-
-    except json.JSONDecodeError as e:
-        _log("ERROR", "Risposta GHE non è JSON valido",
-             url=log_url, error=str(e))
-        raise RuntimeError(
-            f"Risposta GHE non parsabile: {e}"
-        ) from e
+            f"Errore rete GHE dopo {max_retries} tentativi: {error_msg}"
+        ) from last_exception
+    else:
+        raise RuntimeError(f"Richiesta HTTP fallita dopo {max_retries} tentativi")
 
 
 def _redirect(url):
@@ -246,27 +277,37 @@ def _extract_query_params(event):
     - API Gateway v2 HTTP API  → queryStringParameters, rawQueryString
     - Lambda Function URL      → queryStringParameters, rawQueryString
     - ALB                      → queryStringParameters, multiValueQueryStringParameters
-    - Fallback                 → rawPath con ?query
+    - Fallback                 → rawPath con ?query, headers
     """
-    # 1. Sorgente standard: queryStringParameters (dict)
-    params = event.get("queryStringParameters")
-    if params and isinstance(params, dict) and len(params) > 0:
-        _log("DEBUG", "Query params da queryStringParameters", params_keys=list(params.keys()))
-        return params
+    # Log completo dell'evento per debug (prima di processare)
+    _log("DEBUG", "Estrazione query params - evento completo",
+         event_keys=list(event.keys()),
+         queryStringParameters=event.get("queryStringParameters"),
+         rawQueryString=event.get("rawQueryString"),
+         rawPath=event.get("rawPath"),
+         path=event.get("path"),
+         headers_keys=list(event.get("headers", {}).keys()) if event.get("headers") else None)
 
-    # 2. rawQueryString (Lambda Function URL / HTTP API v2) — es. "code=abc123&state=xyz"
+    # 1. rawQueryString FIRST (Lambda Function URL / HTTP API v2) — es. "code=abc123&state=xyz"
+    # Diamo priorità a questo perché è la fonte più affidabile per Function URLs
     raw_qs = event.get("rawQueryString", "")
-    if raw_qs:
+    if raw_qs and raw_qs.strip():
         parsed = urllib.parse.parse_qs(raw_qs, keep_blank_values=True)
         result = {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
-        _log("INFO", "Query params da rawQueryString", raw=raw_qs, parsed_keys=list(result.keys()))
+        _log("INFO", "Query params da rawQueryString", raw=raw_qs, parsed_keys=list(result.keys()), values=result)
         return result
+
+    # 2. Sorgente standard: queryStringParameters (dict)
+    params = event.get("queryStringParameters")
+    if params and isinstance(params, dict) and len(params) > 0:
+        _log("DEBUG", "Query params da queryStringParameters", params_keys=list(params.keys()), values=params)
+        return params
 
     # 3. multiValueQueryStringParameters (API Gateway v1 / ALB)
     multi = event.get("multiValueQueryStringParameters")
     if multi and isinstance(multi, dict) and len(multi) > 0:
         result = {k: v[0] if isinstance(v, list) and len(v) == 1 else v for k, v in multi.items()}
-        _log("INFO", "Query params da multiValueQueryStringParameters", parsed_keys=list(result.keys()))
+        _log("INFO", "Query params da multiValueQueryStringParameters", parsed_keys=list(result.keys()), values=result)
         return result
 
     # 4. Fallback: prova a estrarre da rawPath o path
@@ -276,7 +317,7 @@ def _extract_query_params(event):
             qs = str(path_val).split("?", 1)[1]
             parsed = urllib.parse.parse_qs(qs, keep_blank_values=True)
             result = {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
-            _log("INFO", f"Query params da {path_key} (fallback)", raw=qs, parsed_keys=list(result.keys()))
+            _log("INFO", f"Query params da {path_key} (fallback)", raw=qs, parsed_keys=list(result.keys()), values=result)
             return result
 
     # 5. Ultimo tentativo: requestContext.http.path (API Gateway v2)
@@ -286,17 +327,33 @@ def _extract_query_params(event):
         qs = raw_path.split("?", 1)[1]
         parsed = urllib.parse.parse_qs(qs, keep_blank_values=True)
         result = {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
-        _log("INFO", "Query params da requestContext.http.path (fallback)", parsed_keys=list(result.keys()))
+        _log("INFO", "Query params da requestContext.http.path (fallback)", parsed_keys=list(result.keys()), values=result)
         return result
 
-    _log("WARN", "Nessun query parameter trovato in nessuna sorgente",
+    # 6. Ultima risorsa: prova a cercare nei headers (alcuni proxy passano la query string come header)
+    headers = event.get("headers", {})
+    if headers:
+        for header_key in ("X-Original-URL", "X-Rewrite-URL", "X-Forwarded-Path"):
+            header_val = headers.get(header_key, "")
+            if "?" in header_val:
+                qs = header_val.split("?", 1)[1]
+                parsed = urllib.parse.parse_qs(qs, keep_blank_values=True)
+                result = {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
+                _log("INFO", f"Query params da header {header_key} (fallback)", parsed_keys=list(result.keys()), values=result)
+                return result
+
+    _log("ERROR", "NESSUN query parameter trovato in NESSUNA sorgente",
          has_queryStringParameters=("queryStringParameters" in event),
-         queryStringParameters_value=str(event.get("queryStringParameters"))[:100],
+         queryStringParameters_value=str(event.get("queryStringParameters")),
          has_rawQueryString=("rawQueryString" in event),
-         rawQueryString_value=str(event.get("rawQueryString", ""))[:100],
+         rawQueryString_value=str(event.get("rawQueryString", "")),
+         rawQueryString_repr=repr(event.get("rawQueryString", "")),
          has_rawPath=("rawPath" in event),
-         rawPath_value=str(event.get("rawPath", ""))[:100],
-         has_multiValue=("multiValueQueryStringParameters" in event))
+         rawPath_value=str(event.get("rawPath", "")),
+         has_path=("path" in event),
+         path_value=str(event.get("path", "")),
+         has_multiValue=("multiValueQueryStringParameters" in event),
+         full_event_json=json.dumps(event, default=str)[:2000])
     return {}
 
 
