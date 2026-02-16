@@ -3123,6 +3123,42 @@ body:not(.is-admin) #exportBtn { display: none !important; }
     background: var(--danger-subtle);
 }
 
+/* Save Entry Detail (individual entries with delete button) */
+.save-entry-detail {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 2px 0;
+}
+
+.save-entry-text {
+    flex: 1;
+}
+
+.save-delete-entry-btn {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: var(--text-tertiary);
+    font-size: 1rem;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+    padding: 2px 6px;
+    border-radius: 3px;
+    line-height: 1;
+}
+
+.save-entry-detail:hover .save-delete-entry-btn {
+    opacity: 1;
+}
+
+.save-delete-entry-btn:hover {
+    color: var(--danger);
+    background: var(--danger-subtle);
+}
+
 /* ============================================
    Searchable Filter Input (inline)
    ============================================ */

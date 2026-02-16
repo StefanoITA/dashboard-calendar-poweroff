@@ -50,6 +50,23 @@ const App = (() => {
     };
 
     // ============================================
+    // Utility Functions
+    // ============================================
+
+    // Debounce helper per ottimizzare performance input filtri
+    const debounce = (fn, delay) => {
+        let timeoutId;
+        return (...args) => {
+            clearTimeout(timeoutId);
+            timeoutId = setTimeout(() => fn(...args), delay);
+        };
+    };
+
+    // Debug logging (set DEBUG = true solo in sviluppo)
+    const DEBUG = false;
+    const log = (...args) => DEBUG && console.log(...args);
+
+    // ============================================
     // SSO Configuration (GitHub Enterprise OAuth)
     // ============================================
     const SSO_CONFIG = {
@@ -337,7 +354,7 @@ const App = (() => {
                     ghUsername = result.login;
                     localStorage.setItem(SSO_TOKEN_KEY, result.session_token);
                     localStorage.setItem(SSO_STORAGE_KEY, ghUsername);
-                    console.log('[SSO] OAuth login verified:', ghUsername);
+                    log('[SSO] OAuth login verified:', ghUsername);
                 } else {
                     console.error('[SSO] Transit token verification failed');
                 }
@@ -351,10 +368,10 @@ const App = (() => {
                     if (result && result.login) {
                         ghUsername = result.login;
                         localStorage.setItem(SSO_STORAGE_KEY, ghUsername);
-                        console.log('[SSO] Session restored:', ghUsername);
+                        log('[SSO] Session restored:', ghUsername);
                     } else {
                         clearSSOSession();
-                        console.log('[SSO] Session expired, re-authentication needed');
+                        log('[SSO] Session expired, re-authentication needed');
                     }
                 }
             }
@@ -372,7 +389,7 @@ const App = (() => {
                 ssoAuthenticated = true;
                 DataManager.setCurrentUser(ssoUser.id);
                 localStorage.setItem('shutdownScheduler_userId', ssoUser.id);
-                console.log('[SSO] User matched:', ssoUser.name, '(' + ssoUser.role + ')');
+                log('[SSO] User matched:', ssoUser.name, '(' + ssoUser.role + ')');
             } else {
                 clearSSOSession();
                 showUnauthorizedScreen(ghUsername);
@@ -2044,7 +2061,7 @@ const App = (() => {
                 chip.innerHTML = `<span class="gc-filter-dot" style="background:${color}"></span>${a}`;
                 chip.addEventListener('click', () => {
                     if (activeApps.has(a)) activeApps.delete(a); else activeApps.add(a);
-                    renderFilterChips();
+                    chip.classList.toggle('active');
                     renderRows();
                 });
                 appContainer.appendChild(chip);
@@ -2057,7 +2074,7 @@ const App = (() => {
                 chip.innerHTML = `<span class="gc-filter-dot" style="background:${color}"></span>${e}`;
                 chip.addEventListener('click', () => {
                     if (activeEnvs.has(e)) activeEnvs.delete(e); else activeEnvs.add(e);
-                    renderFilterChips();
+                    chip.classList.toggle('active');
                     renderRows();
                 });
                 envContainer.appendChild(chip);
@@ -2227,7 +2244,7 @@ const App = (() => {
 
         renderFilterChips();
         renderRows();
-        vmView.querySelector('#vmFilterSearch').addEventListener('input', renderRows);
+        vmView.querySelector('#vmFilterSearch').addEventListener('input', debounce(renderRows, 300));
     }
 
     // ============================================
@@ -2360,7 +2377,8 @@ const App = (() => {
                 chip.innerHTML = `<span class="gc-filter-dot" style="background:${color}"></span>${a}`;
                 chip.addEventListener('click', () => {
                     if (activeApps.has(a)) activeApps.delete(a); else activeApps.add(a);
-                    renderFilterChips(); renderRows();
+                    chip.classList.toggle('active');
+                    renderRows();
                 });
                 appContainer.appendChild(chip);
             });
@@ -2371,7 +2389,8 @@ const App = (() => {
                 chip.innerHTML = `<span class="gc-filter-dot" style="background:${color}"></span>${e}`;
                 chip.addEventListener('click', () => {
                     if (activeEnvs.has(e)) activeEnvs.delete(e); else activeEnvs.add(e);
-                    renderFilterChips(); renderRows();
+                    chip.classList.toggle('active');
+                    renderRows();
                 });
                 envContainer.appendChild(chip);
             });
@@ -2503,7 +2522,7 @@ const App = (() => {
 
         renderFilterChips();
         renderRows();
-        ebsView.querySelector('#ebsFilterSearch').addEventListener('input', renderRows);
+        ebsView.querySelector('#ebsFilterSearch').addEventListener('input', debounce(renderRows, 300));
     }
 
     // ============================================
@@ -2706,7 +2725,10 @@ const App = (() => {
                 curr.forEach(e => {
                     const typeLabel = e.type === 'shutdown' ? 'Shutdown' : `${e.startTime}-${e.stopTime}`;
                     const recLabel = e.recurring && e.recurring !== 'none' ? ` (${recurringLabels[e.recurring]})` : e.dates ? ` (${e.dates.length} gg)` : '';
-                    entryDetail += `<div class="save-entry-detail">${typeLabel}${recLabel}</div>`;
+                    entryDetail += `<div class="save-entry-detail">
+                        <span class="save-entry-text">${typeLabel}${recLabel}</span>
+                        <button class="save-delete-entry-btn" data-entry-id="${e.id}" data-hostname="${hostname}" data-app="${c.app}" data-env="${c.env}" title="Elimina questa entry">&times;</button>
+                    </div>`;
                 });
 
                 detailHtml += `<div class="save-hostname-row" data-save-hostname="${hostname}" data-save-app="${c.app}" data-save-env="${c.env}">
@@ -2738,6 +2760,7 @@ const App = (() => {
             confirmClass: 'btn-primary',
             wide: true,
             onMount: (overlay) => {
+                // Hostname-level deletion (rimuove tutte le entry per un hostname)
                 overlay.querySelectorAll('.save-delete-btn').forEach(btn => {
                     btn.addEventListener('click', async (e) => {
                         e.stopPropagation();
@@ -2745,9 +2768,44 @@ const App = (() => {
                         const app = btn.dataset.app;
                         const env = btn.dataset.env;
                         DataManager.removeAllSchedules(app, env, h);
-                        AuditLog.log('Eliminazione entry da salvataggio', `${app} / ${env} / ${h}`);
+                        AuditLog.log('Eliminazione hostname da salvataggio', `${app} / ${env} / ${h}`);
                         btn.closest('.save-hostname-row').remove();
                         showToast(`Rimosso: ${h}`, 'info');
+                    });
+                });
+
+                // Entry-level deletion (rimuove singola entry)
+                overlay.querySelectorAll('.save-delete-entry-btn').forEach(btn => {
+                    btn.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        const entryId = btn.dataset.entryId;
+                        const hostname = btn.dataset.hostname;
+                        const app = btn.dataset.app;
+                        const env = btn.dataset.env;
+
+                        // Rimuovi entry usando metodo esistente
+                        DataManager.removeScheduleEntry(app, env, hostname, entryId);
+                        AuditLog.log('Eliminazione entry da save modal', `${app}/${env}/${hostname} - Entry ${entryId}`);
+
+                        // Rimuovi visivamente l'entry
+                        const entryDiv = btn.closest('.save-entry-detail');
+                        entryDiv.remove();
+
+                        // Se non ci sono più entry per questo hostname, rimuovi l'intera riga
+                        const hostnameRow = overlay.querySelector(`[data-save-hostname="${hostname}"][data-save-app="${app}"][data-save-env="${env}"]`);
+                        if (hostnameRow && hostnameRow.querySelectorAll('.save-entry-detail').length === 0) {
+                            hostnameRow.remove();
+                        }
+
+                        // Ricalcola change count e chiudi modal se non ci sono più modifiche
+                        const remaining = DynamoService.getModifiedAppEnvs(DataManager.getSchedulesRef());
+                        if (remaining.length === 0) {
+                            overlay.remove();
+                            showToast('Nessuna modifica rimasta da salvare', 'info');
+                            return;
+                        }
+
+                        showToast('Entry rimossa', 'info');
                     });
                 });
             }
