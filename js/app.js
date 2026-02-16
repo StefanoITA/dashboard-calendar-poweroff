@@ -2254,6 +2254,7 @@ const App = (() => {
         const allDisks = DataManager.getEBSVolumes();
         const apps = [...new Set(allDisks.map(d => d.application).filter(Boolean))].sort();
         const envs = [...new Set(allDisks.map(d => d.environment).filter(Boolean))].sort();
+        const selectedRows = new Set();
         const activeApps = new Set();
         const activeEnvs = new Set();
         let sortCol = null, sortAsc = true;
@@ -2275,6 +2276,9 @@ const App = (() => {
                         <div class="vm-list-subtitle">${allDisks.length} volumi totali</div>
                     </div>
                     <div class="vm-list-actions">
+                        <button class="btn-secondary vm-copy-btn" id="ebsCopySelected" style="display:none">
+                            ${SVG.copy} Copia selezionati (<span id="ebsSelectedCount">0</span>)
+                        </button>
                         <button class="btn-secondary vm-copy-btn" id="ebsCopyAll">
                             ${SVG.copy} Copia elenco visibile
                         </button>
@@ -2302,6 +2306,7 @@ const App = (() => {
                 <table class="vm-list-table">
                     <thead>
                         <tr>
+                            <th class="vm-th-check"><input type="checkbox" id="ebsSelectAll" title="Seleziona tutti"></th>
                             <th class="vm-th-sortable" data-col="volume_id">Volume ID <span class="vm-sort-icon"></span></th>
                             <th class="vm-th-sortable" data-col="size_gb">Dimensione (GB) <span class="vm-sort-icon"></span></th>
                             <th class="vm-th-sortable" data-col="iops">IOPS <span class="vm-sort-icon"></span></th>
@@ -2316,7 +2321,7 @@ const App = (() => {
             </div>`;
 
         if (allDisks.length === 0) {
-            ebsView.querySelector('#ebsListBody').innerHTML = `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-tertiary);">Nessun volume EBS trovato. Aggiungere i dati nel file <code>data/ebs_volumes.csv</code>.</td></tr>`;
+            ebsView.querySelector('#ebsListBody').innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-tertiary);">Nessun volume EBS trovato. Aggiungere i dati nel file <code>data/ebs_volumes.csv</code>.</td></tr>`;
         }
 
         const renderTotals = (disks) => {
@@ -2328,6 +2333,19 @@ const App = (() => {
                 <div class="ebs-total-card"><div class="ebs-total-value">${fmt(disks.length)}</div><div class="ebs-total-label">Volumi</div></div>
                 <div class="ebs-total-card"><div class="ebs-total-value">${fmt(Math.round(totalSize))}</div><div class="ebs-total-label">GB Totali</div></div>
                 <div class="ebs-total-card ebs-total-card-wide"><div class="ebs-total-label" style="margin-bottom:4px;">Tipi di disco</div><div class="ebs-type-list">${typeStr || '<span style="color:var(--text-tertiary);">—</span>'}</div></div>`;
+        };
+
+        const updateSelectedUI = () => {
+            const btn = ebsView.querySelector('#ebsCopySelected');
+            const count = ebsView.querySelector('#ebsSelectedCount');
+            if (selectedRows.size > 0) {
+                btn.style.display = 'inline-flex';
+                count.textContent = selectedRows.size;
+            } else {
+                btn.style.display = 'none';
+            }
+            const selectAll = ebsView.querySelector('#ebsSelectAll');
+            if (selectAll) selectAll.checked = lastFiltered.length > 0 && lastFiltered.every(d => selectedRows.has(d.volume_id));
         };
 
         const renderFilterChips = () => {
@@ -2397,7 +2415,9 @@ const App = (() => {
             const fmt = n => Number(n).toLocaleString('it-IT');
             tbody.innerHTML = filtered.map(d => {
                 const eColor = envColors[d.environment] || '#7a7a96';
-                return `<tr>
+                const checked = selectedRows.has(d.volume_id) ? 'checked' : '';
+                return `<tr class="${checked ? 'vm-row-selected' : ''}" data-volume-id="${d.volume_id}">
+                    <td class="vm-td-check"><input type="checkbox" class="ebs-row-check" data-volume-id="${d.volume_id}" ${checked}></td>
                     <td class="vm-cell-hostname vm-cell-copyable" data-copy="${d.volume_id}" title="Clicca per copiare"><code>${d.volume_id}</code> <span class="vm-copy-hint">${SVG.copy}</span></td>
                     <td style="font-weight:600;">${fmt(d.size_gb || 0)}</td>
                     <td>${fmt(d.iops || 0)}</td>
@@ -2413,11 +2433,22 @@ const App = (() => {
                     try { await navigator.clipboard.writeText(cell.dataset.copy); showToast('Copiato: ' + cell.dataset.copy, 'success'); } catch {}
                 });
             });
+
+            // Row checkboxes
+            tbody.querySelectorAll('.ebs-row-check').forEach(cb => {
+                cb.addEventListener('change', () => {
+                    if (cb.checked) selectedRows.add(cb.dataset.volumeId);
+                    else selectedRows.delete(cb.dataset.volumeId);
+                    cb.closest('tr').classList.toggle('vm-row-selected', cb.checked);
+                    updateSelectedUI();
+                });
+            });
+
+            updateSelectedUI();
         };
 
-        // Copy
-        ebsView.querySelector('#ebsCopyAll').addEventListener('click', async () => {
-            if (lastFiltered.length === 0) { showToast('Nessun dato da copiare', 'info'); return; }
+        const copyDisksAsTable = async (disks, label) => {
+            if (disks.length === 0) { showToast('Nessun disco da copiare', 'info'); return; }
             const cols = [
                 { key: 'volume_id', label: 'Volume ID' }, { key: 'size_gb', label: 'Size (GB)' },
                 { key: 'iops', label: 'IOPS' }, { key: 'throughput', label: 'Throughput' },
@@ -2426,12 +2457,38 @@ const App = (() => {
             ];
             let html = '<table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:12px;">';
             html += '<thead><tr>' + cols.map(c => `<th style="background:#f2f2f2;padding:6px 10px;text-align:left;font-weight:bold;border:1px solid #ccc;">${c.label}</th>`).join('') + '</tr></thead><tbody>';
-            lastFiltered.forEach(d => { html += '<tr>' + cols.map(c => `<td style="padding:4px 10px;border:1px solid #ddd;">${d[c.key] || '-'}</td>`).join('') + '</tr>'; });
+            disks.forEach(d => { html += '<tr>' + cols.map(c => `<td style="padding:4px 10px;border:1px solid #ddd;">${d[c.key] || '-'}</td>`).join('') + '</tr>'; });
             html += '</tbody></table>';
             try {
-                await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([lastFiltered.map(d => cols.map(c => d[c.key] || '-').join('\t')).join('\n')], { type: 'text/plain' }) })]);
-                showToast(`${lastFiltered.length} volumi copiati come tabella`, 'success');
-            } catch { showToast('Errore nella copia', 'error'); }
+                await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([disks.map(d => cols.map(c => d[c.key] || '-').join('\t')).join('\n')], { type: 'text/plain' }) })]);
+                showToast(`${disks.length} volumi copiati come tabella`, 'success');
+            } catch {
+                // Fallback to plain text
+                try {
+                    const text = disks.map(d => cols.map(c => d[c.key] || '-').join('\t')).join('\n');
+                    await navigator.clipboard.writeText(text);
+                    showToast(`${disks.length} volumi copiati negli appunti`, 'success');
+                } catch { showToast('Errore nella copia', 'error'); }
+            }
+        };
+
+        // Copy all visible
+        ebsView.querySelector('#ebsCopyAll').addEventListener('click', () => copyDisksAsTable(lastFiltered, 'visibili'));
+
+        // Copy selected
+        ebsView.querySelector('#ebsCopySelected').addEventListener('click', () => {
+            const selected = lastFiltered.filter(d => selectedRows.has(d.volume_id));
+            copyDisksAsTable(selected, 'selezionati');
+        });
+
+        // Select all checkbox
+        ebsView.querySelector('#ebsSelectAll').addEventListener('change', (e) => {
+            if (e.target.checked) {
+                lastFiltered.forEach(d => selectedRows.add(d.volume_id));
+            } else {
+                lastFiltered.forEach(d => selectedRows.delete(d.volume_id));
+            }
+            renderRows();
         });
 
         // Sort
