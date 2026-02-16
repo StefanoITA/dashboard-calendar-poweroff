@@ -13,13 +13,13 @@ const DataManager = (() => {
     function parseCSV(text) {
         const lines = text.trim().split('\n');
         if (lines.length < 2) return [];
-        const headers = lines[0].split(',').map(h => h.trim());
+        const headers = lines[0].split(',').map(h => sanitizeInput(h.trim(), 100));
         const result = [];
         for (let i = 1; i < lines.length; i++) {
             const values = parseCSVLine(lines[i]);
             if (values.length !== headers.length) continue;
             const obj = {};
-            headers.forEach((h, idx) => { obj[h] = values[idx].trim(); });
+            headers.forEach((h, idx) => { obj[h] = sanitizeInput(values[idx].trim()); });
             result.push(obj);
         }
         return result;
@@ -41,6 +41,15 @@ const DataManager = (() => {
 
     function generateId() {
         return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+    }
+
+    // Input sanitization per prevenire XSS
+    function sanitizeInput(str, maxLength = 500) {
+        if (typeof str !== 'string') return '';
+        return str
+            .replace(/[<>'"]/g, '')  // Rimuovi caratteri HTML pericolosi
+            .trim()
+            .slice(0, maxLength);  // Limita lunghezza
     }
 
     // ============================================
@@ -309,6 +318,8 @@ const DataManager = (() => {
             a.machineCount++;
         });
         let result = Array.from(apps.values());
+        // Ordinamento alfabetico A-Z
+        result.sort((a, b) => a.name.localeCompare(b.name));
         if (!unfiltered && currentUser) {
             result = result.filter(a => canAccessApp(a.name));
         }
@@ -507,7 +518,7 @@ const DataManager = (() => {
         if (!notes[hostname]) notes[hostname] = [];
         const note = {
             id: generateId(),
-            text,
+            text: sanitizeInput(text, 1000),  // Sanitizza input note
             timestamp: new Date().toISOString(),
             user: currentUser ? currentUser.name : 'Sistema'
         };
@@ -520,7 +531,7 @@ const DataManager = (() => {
         if (!notes[hostname]) return;
         const note = notes[hostname].find(n => n.id === noteId);
         if (note) {
-            note.text = text;
+            note.text = sanitizeInput(text, 1000);  // Sanitizza input note
             note.editedAt = new Date().toISOString();
             saveNotesToStorage();
         }
