@@ -1237,8 +1237,7 @@ const App = (() => {
                         </div>
                     </div>
                 </div>
-                <div class="machine-card-body" data-server-type="${m.server_type}">
-                    ${desc ? `<div class="machine-description">${desc}</div>` : ''}
+                <div class="machine-card-body" data-server-type="${m.server_type}" data-description="${desc}">
                     <div class="entries-list">${renderEntriesList(entries, m.hostname, readOnly)}</div>
                     ${renderNotesSection(m.hostname, notesArr, readOnly)}
                 </div>
@@ -2636,6 +2635,14 @@ const App = (() => {
                     </button>
                 </div>
             </div>
+            <div class="vm-list-filters" style="margin-bottom:0;border-bottom:none;">
+                <div class="vm-filter-row">
+                    <div class="vm-filter-search-group">
+                        <input type="text" class="vm-filter-search" id="umSearchInput" placeholder="Cerca per nome, user ID, GitHub, ruolo...">
+                    </div>
+                    <span class="vm-filter-count" id="umUserCount"></span>
+                </div>
+            </div>
             <div class="user-mgmt-table-wrapper">
                 <table class="user-mgmt-table">
                     <thead>
@@ -2668,15 +2675,33 @@ const App = (() => {
             usersList = DataManager.getUsers();
         }
 
-        const renderTable = () => {
+        const renderTable = (searchFilter = '') => {
             const tbody = mgmtView.querySelector('#umTableBody');
             if (!usersList || usersList.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-tertiary);">Nessun utente trovato</td></tr>';
+                mgmtView.querySelector('#umUserCount').textContent = '0 utenti';
                 return;
             }
 
-            tbody.innerHTML = usersList.map(u => {
+            const q = searchFilter.toLowerCase();
+            const filtered = q ? usersList.filter(u => {
+                const uid = u.user_id || u.id || '';
+                const searchStr = `${uid} ${u.name || ''} ${u.github_user || ''} ${u.role || ''}`.toLowerCase();
+                return searchStr.includes(q);
+            }) : usersList;
+
+            mgmtView.querySelector('#umUserCount').textContent = `${filtered.length} utent${filtered.length === 1 ? 'e' : 'i'}`;
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-tertiary);">Nessun risultato per "${searchFilter}"</td></tr>`;
+                return;
+            }
+
+            const currentUserId = (() => { const c = DataManager.getCurrentUser(); return c ? (c.user_id || c.id) : null; })();
+
+            tbody.innerHTML = filtered.map(u => {
                 const userId = u.user_id || u.id;
+                const isSelf = userId === currentUserId;
                 const roleClass = u.role === 'Admin' ? 'admin' : u.role === 'Application_owner' ? 'owner' : 'readonly';
                 const roleLabel = u.role === 'Admin' ? 'Admin' : u.role === 'Application_owner' ? 'App Owner' : 'Read-Only';
 
@@ -2726,9 +2751,9 @@ const App = (() => {
                             <button class="user-action-btn um-edit-btn" data-user-id="${userId}" title="Modifica">
                                 ${SVG.edit}
                             </button>
-                            <button class="user-action-btn danger um-delete-btn" data-user-id="${userId}" title="Elimina">
+                            ${!isSelf ? `<button class="user-action-btn danger um-delete-btn" data-user-id="${userId}" title="Elimina">
                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                            </button>
+                            </button>` : '<span style="font-size:0.7rem;color:var(--text-tertiary);" title="Non puoi eliminare te stesso">Tu</span>'}
                         </div>
                     </td>
                 </tr>`;
@@ -2768,6 +2793,11 @@ const App = (() => {
 
         renderTable();
 
+        // Search filter
+        mgmtView.querySelector('#umSearchInput').addEventListener('input', debounce(() => {
+            renderTable(mgmtView.querySelector('#umSearchInput').value.trim());
+        }, 250));
+
         // Add user button
         mgmtView.querySelector('#umAddUserBtn').addEventListener('click', () => {
             openUserEditPanel(null, true, () => renderUserManagement());
@@ -2779,6 +2809,8 @@ const App = (() => {
 
     function openUserEditPanel(existingUser, isNew, onSaved) {
         const allApps = DataManager.getApplications(true).map(a => a.name);
+        const currentLoggedIn = DataManager.getCurrentUser();
+        const isSelf = !isNew && existingUser && (existingUser.user_id || existingUser.id) === (currentLoggedIn.user_id || currentLoggedIn.id);
 
         // Build current permissions map from user
         const currentPerms = {};
@@ -2820,11 +2852,12 @@ const App = (() => {
                         </div>
                         <div class="user-edit-field">
                             <label>Ruolo</label>
-                            <select id="ueRole">
+                            <select id="ueRole" ${isSelf ? 'disabled style="opacity:0.6;cursor:not-allowed;"' : ''}>
                                 <option value="Admin" ${existingUser && existingUser.role === 'Admin' ? 'selected' : ''}>Admin</option>
                                 <option value="Application_owner" ${existingUser && existingUser.role === 'Application_owner' ? 'selected' : ''}>Application Owner</option>
                                 <option value="Read-Only" ${existingUser && existingUser.role === 'Read-Only' ? 'selected' : ''}>Read-Only</option>
                             </select>
+                            ${isSelf ? '<small style="color:var(--text-tertiary);font-size:0.72rem;">Non puoi modificare il tuo ruolo</small>' : ''}
                         </div>
                     </div>
 
@@ -2933,7 +2966,8 @@ const App = (() => {
             const userId = overlay.querySelector('#ueUserId').value.trim();
             const name = overlay.querySelector('#ueName').value.trim();
             const github = overlay.querySelector('#ueGithub').value.trim();
-            const role = overlay.querySelector('#ueRole').value;
+            // If editing self, force original role (prevent lockout)
+            const role = isSelf && existingUser ? existingUser.role : overlay.querySelector('#ueRole').value;
 
             if (!userId || !name || !github) {
                 showToast('Compila tutti i campi obbligatori (User ID, Nome, GitHub)', 'error');
