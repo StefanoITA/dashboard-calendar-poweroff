@@ -284,6 +284,8 @@ const DataManager = (() => {
     // ============================================
     // DynamoDB Integration
     // ============================================
+    let dynamoInitialized = false;
+
     async function loadFromDynamo() {
         if (!DynamoService.CONFIG.enabled) return false;
         const pairs = getAccessibleAppEnvPairs();
@@ -293,44 +295,48 @@ const DataManager = (() => {
         const items = await DynamoService.fetchAll(keys);
         if (!items) return false;
 
-        // Check if DynamoDB has data
-        let hasAnyData = false;
-        for (const key of keys) {
-            if (items[key] && Object.keys(items[key]).length > 0) {
-                hasAnyData = true;
-                break;
+        // On first load only: if DynamoDB is completely empty, push local state as seed
+        if (!dynamoInitialized) {
+            let hasAnyData = false;
+            for (const key of keys) {
+                if (items[key] && Object.keys(items[key]).length > 0) {
+                    hasAnyData = true;
+                    break;
+                }
+            }
+            if (!hasAnyData) {
+                for (const pair of pairs) {
+                    const data = DynamoService.extractAppEnvData(schedules, pair.app, pair.env);
+                    if (Object.keys(data).length > 0) {
+                        try {
+                            await DynamoService.saveOne(
+                                DynamoService.appEnvKey(pair.app, pair.env),
+                                data,
+                                currentUser ? currentUser.id : 'system'
+                            );
+                        } catch (e) { console.warn('Failed to push initial state:', e); }
+                    }
+                }
+                dynamoInitialized = true;
+                DynamoService.takeSnapshot(schedules);
+                return true;
             }
         }
+        dynamoInitialized = true;
 
-        if (hasAnyData) {
-            // DynamoDB is authoritative — clear local schedules for these app/envs,
-            // then replace with DynamoDB data (no merge, no duplication)
-            for (const pair of pairs) {
-                const prefix = `${pair.app}|${pair.env}|`;
-                Object.keys(schedules).forEach(k => { if (k.startsWith(prefix)) delete schedules[k]; });
-            }
-            for (const pair of pairs) {
-                const dynKey = DynamoService.appEnvKey(pair.app, pair.env);
-                if (items[dynKey]) {
-                    DynamoService.mergeIntoSchedules(schedules, pair.app, pair.env, items[dynKey]);
-                }
-            }
-            saveSchedulesToStorage();
-        } else {
-            // DynamoDB is empty — push local state as initial seed
-            for (const pair of pairs) {
-                const data = DynamoService.extractAppEnvData(schedules, pair.app, pair.env);
-                if (Object.keys(data).length > 0) {
-                    try {
-                        await DynamoService.saveOne(
-                            DynamoService.appEnvKey(pair.app, pair.env),
-                            data,
-                            currentUser ? currentUser.id : 'system'
-                        );
-                    } catch (e) { console.warn('Failed to push initial state:', e); }
-                }
+        // DynamoDB is authoritative — clear local schedules for these app/envs,
+        // then replace with DynamoDB data (handles both additions and deletions)
+        for (const pair of pairs) {
+            const prefix = `${pair.app}|${pair.env}|`;
+            Object.keys(schedules).forEach(k => { if (k.startsWith(prefix)) delete schedules[k]; });
+        }
+        for (const pair of pairs) {
+            const dynKey = DynamoService.appEnvKey(pair.app, pair.env);
+            if (items[dynKey]) {
+                DynamoService.mergeIntoSchedules(schedules, pair.app, pair.env, items[dynKey]);
             }
         }
+        saveSchedulesToStorage();
 
         DynamoService.takeSnapshot(schedules);
         return true;
@@ -692,24 +698,24 @@ const DataManager = (() => {
 
             if (entry.recurring === 'daily') {
                 if (entry.type === 'window') {
-                    cj.crons.push({ action: 'startup', expression: `${startM} ${startH} * * *` });
-                    cj.crons.push({ action: 'shutdown', expression: `${stopM} ${stopH} * * *` });
+                    cj.crons.push({ action: 'start', expression: `${startM} ${startH} * * *` });
+                    cj.crons.push({ action: 'stop', expression: `${stopM} ${stopH} * * *` });
                 } else {
-                    cj.crons.push({ action: 'shutdown', expression: '0 0 * * *' });
+                    cj.crons.push({ action: 'stop', expression: '0 0 * * *' });
                 }
             } else if (entry.recurring === 'weekdays') {
                 if (entry.type === 'window') {
-                    cj.crons.push({ action: 'startup', expression: `${startM} ${startH} * * 1-5` });
-                    cj.crons.push({ action: 'shutdown', expression: `${stopM} ${stopH} * * 1-5` });
+                    cj.crons.push({ action: 'start', expression: `${startM} ${startH} * * 1-5` });
+                    cj.crons.push({ action: 'stop', expression: `${stopM} ${stopH} * * 1-5` });
                 } else {
-                    cj.crons.push({ action: 'shutdown', expression: '0 0 * * 1-5' });
+                    cj.crons.push({ action: 'stop', expression: '0 0 * * 1-5' });
                 }
             } else if (entry.recurring === 'weekends') {
                 if (entry.type === 'window') {
-                    cj.crons.push({ action: 'startup', expression: `${startM} ${startH} * * 0,6` });
-                    cj.crons.push({ action: 'shutdown', expression: `${stopM} ${stopH} * * 0,6` });
+                    cj.crons.push({ action: 'start', expression: `${startM} ${startH} * * 0,6` });
+                    cj.crons.push({ action: 'stop', expression: `${stopM} ${stopH} * * 0,6` });
                 } else {
-                    cj.crons.push({ action: 'shutdown', expression: '0 0 * * 0,6' });
+                    cj.crons.push({ action: 'stop', expression: '0 0 * * 0,6' });
                 }
             } else if (entry.dates && entry.dates.length > 0) {
                 // Group dates by month for compact cron
@@ -723,10 +729,10 @@ const DataManager = (() => {
                 for (const group of Object.values(byMonth)) {
                     const days = group.days.sort((a, b) => a - b).join(',');
                     if (entry.type === 'window') {
-                        cj.crons.push({ action: 'startup', expression: `${startM} ${startH} ${days} ${group.month} *` });
-                        cj.crons.push({ action: 'shutdown', expression: `${stopM} ${stopH} ${days} ${group.month} *` });
+                        cj.crons.push({ action: 'start', expression: `${startM} ${startH} ${days} ${group.month} *` });
+                        cj.crons.push({ action: 'stop', expression: `${stopM} ${stopH} ${days} ${group.month} *` });
                     } else {
-                        cj.crons.push({ action: 'shutdown', expression: `0 0 ${days} ${group.month} *` });
+                        cj.crons.push({ action: 'stop', expression: `0 0 ${days} ${group.month} *` });
                     }
                 }
             }
