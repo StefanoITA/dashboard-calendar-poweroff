@@ -225,7 +225,13 @@ const DataManager = (() => {
             const response = await fetch(cacheBust(path));
             const text = await response.text();
             machines = parseCSV(text);
-            loadSchedulesFromStorage();
+            // Only load schedules from localStorage if DynamoDB is NOT enabled.
+            // When DynamoDB is enabled, loadFromDynamo() will authoritatively
+            // set the schedules — loading from localStorage here would restore
+            // stale/dirty draft data that the user hasn't saved.
+            if (!DynamoService.CONFIG.enabled) {
+                loadSchedulesFromStorage();
+            }
             loadNotesFromStorage();
             return machines;
         } catch (err) {
@@ -284,8 +290,6 @@ const DataManager = (() => {
     // ============================================
     // DynamoDB Integration
     // ============================================
-    let dynamoInitialized = false;
-
     async function loadFromDynamo() {
         if (!DynamoService.CONFIG.enabled) return false;
         const pairs = getAccessibleAppEnvPairs();
@@ -295,37 +299,10 @@ const DataManager = (() => {
         const items = await DynamoService.fetchAll(keys);
         if (!items) return false;
 
-        // On first load only: if DynamoDB is completely empty, push local state as seed
-        if (!dynamoInitialized) {
-            let hasAnyData = false;
-            for (const key of keys) {
-                if (items[key] && Object.keys(items[key]).length > 0) {
-                    hasAnyData = true;
-                    break;
-                }
-            }
-            if (!hasAnyData) {
-                for (const pair of pairs) {
-                    const data = DynamoService.extractAppEnvData(schedules, pair.app, pair.env);
-                    if (Object.keys(data).length > 0) {
-                        try {
-                            await DynamoService.saveOne(
-                                DynamoService.appEnvKey(pair.app, pair.env),
-                                data,
-                                currentUser ? currentUser.id : 'system'
-                            );
-                        } catch (e) { console.warn('Failed to push initial state:', e); }
-                    }
-                }
-                dynamoInitialized = true;
-                DynamoService.takeSnapshot(schedules);
-                return true;
-            }
-        }
-        dynamoInitialized = true;
-
-        // DynamoDB is authoritative — clear local schedules for these app/envs,
-        // then replace with DynamoDB data (handles both additions and deletions)
+        // DynamoDB is ALWAYS authoritative — clear local schedules for all
+        // accessible app/envs, then replace with DynamoDB data.
+        // This ensures deleted entries stay deleted, and unsaved local
+        // drafts are discarded on refresh. No auto-seed, no merge.
         for (const pair of pairs) {
             const prefix = `${pair.app}|${pair.env}|`;
             Object.keys(schedules).forEach(k => { if (k.startsWith(prefix)) delete schedules[k]; });
@@ -337,7 +314,6 @@ const DataManager = (() => {
             }
         }
         saveSchedulesToStorage();
-
         DynamoService.takeSnapshot(schedules);
         return true;
     }
