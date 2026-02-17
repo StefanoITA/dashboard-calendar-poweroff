@@ -213,7 +213,12 @@ def _verify_token(token_str):
 
 
 def _extract_token(event):
-    """Estrae il token dall'header Authorization: Bearer <token>."""
+    """
+    Estrae il token in ordine di priorità:
+      1. Header Authorization: Bearer <token>
+      2. Campo "_token" nel body JSON (fallback se API GW stripa l'header)
+      3. Query parameter "token" (fallback per GET)
+    """
     headers = event.get("headers", {})
 
     # Debug: log tutte le chiavi degli headers ricevuti
@@ -223,6 +228,7 @@ def _extract_token(event):
          headers_type=type(headers).__name__,
          headers_count=len(header_keys))
 
+    # --- Tentativo 1: Header Authorization ---
     # API Gateway HTTP API v2 lowercasa tutti gli headers
     # API Gateway REST API v1 mantiene il case originale
     auth = headers.get("authorization") or headers.get("Authorization") or ""
@@ -236,19 +242,49 @@ def _extract_token(event):
 
     if auth.startswith("Bearer "):
         token = auth[7:]
-        _log("DEBUG", "Token extraction — Token estratto",
+        _log("DEBUG", "Token extraction — Token estratto da header",
              token_preview=_redact_token(token),
-             has_dot="." in token)
+             source="header")
         return token
 
-    # Fallback: cerca in tutti gli headers (case-insensitive)
+    # Fallback header: cerca in tutti gli headers (case-insensitive)
     for key, value in headers.items():
-        if key.lower() == "authorization" and value.startswith("Bearer "):
+        if key.lower() == "authorization" and isinstance(value, str) and value.startswith("Bearer "):
             _log("DEBUG", "Token extraction — Trovato con key case-insensitive",
-                 original_key=key)
+                 original_key=key, source="header_fallback")
             return value[7:]
 
-    _log("WARN", "Token extraction — Nessun token trovato",
+    # --- Tentativo 2: Campo "_token" nel body JSON ---
+    _log("DEBUG", "Token extraction — Header non trovato, provo body._token")
+    raw_body = event.get("body") or ""
+    if event.get("isBase64Encoded"):
+        try:
+            raw_body = base64.b64decode(raw_body).decode("utf-8")
+        except Exception:
+            raw_body = ""
+    try:
+        body = json.loads(raw_body) if raw_body else {}
+    except (json.JSONDecodeError, TypeError):
+        body = {}
+
+    body_token = body.get("_token", "")
+    if body_token:
+        _log("DEBUG", "Token extraction — Token estratto da body._token",
+             token_preview=_redact_token(body_token),
+             source="body")
+        return body_token
+
+    # --- Tentativo 3: Query parameter "token" ---
+    qsp = event.get("queryStringParameters") or {}
+    q_token = qsp.get("token", "")
+    if q_token:
+        _log("DEBUG", "Token extraction — Token estratto da query param",
+             token_preview=_redact_token(q_token),
+             source="query")
+        return q_token
+
+    _log("WARN", "Token extraction — Nessun token trovato in nessuna fonte",
+         sources_tried=["header", "body._token", "queryStringParameters.token"],
          all_headers={k: v[:20] + "..." if len(str(v)) > 20 else v for k, v in headers.items()})
     return None
 
