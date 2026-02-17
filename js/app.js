@@ -94,11 +94,20 @@ const App = (() => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ token })
             });
-            if (!resp.ok) return null;
+            if (resp.status === 401) {
+                // Token esplicitamente rifiutato → sessione scaduta/invalida
+                return { rejected: true };
+            }
+            if (!resp.ok) {
+                // Errore server (5xx) → non è colpa del token
+                console.warn('[SSO] Lambda error (server-side):', resp.status);
+                return { network_error: true };
+            }
             return await resp.json();
         } catch (err) {
-            console.error('[SSO] Token verify failed:', err.message);
-            return null;
+            // Errore rete/timeout → Lambda irraggiungibile
+            console.warn('[SSO] Lambda irraggiungibile:', err.message);
+            return { network_error: true };
         }
     }
 
@@ -369,7 +378,19 @@ const App = (() => {
                         ghUsername = result.login;
                         localStorage.setItem(SSO_STORAGE_KEY, ghUsername);
                         log('[SSO] Session restored:', ghUsername);
+                    } else if (result && result.network_error) {
+                        // Lambda irraggiungibile — NON cancellare la sessione!
+                        // Usa lo username salvato per non bloccare l'utente
+                        const savedLogin = localStorage.getItem(SSO_STORAGE_KEY);
+                        if (savedLogin) {
+                            ghUsername = savedLogin;
+                            console.warn('[SSO] Lambda non raggiungibile, sessione mantenuta offline per:', ghUsername);
+                        } else {
+                            // Nessuno username salvato, non possiamo procedere
+                            log('[SSO] Lambda non raggiungibile e nessuna sessione locale');
+                        }
                     } else {
+                        // Token esplicitamente rifiutato (401) o risposta vuota
                         clearSSOSession();
                         log('[SSO] Session expired, re-authentication needed');
                     }
