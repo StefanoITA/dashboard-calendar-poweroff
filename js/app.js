@@ -326,14 +326,12 @@ const App = (() => {
     async function init() {
         initTheme();
 
-        // Load only users first (needed for SSO matching)
-        await DataManager.loadUsers();
-        const users = DataManager.getUsers();
-
-        // SSO Authentication via OAuth + Token HMAC
+        // ============================================
+        // STEP 1: OAuth — assicura che il session token sia in localStorage
+        // PRIMA di qualsiasi chiamata a DynamoDB (loadUsers, loadFromDynamo, ecc.)
+        // ============================================
+        let ghUsername = null;
         if (SSO_CONFIG.enabled) {
-            let ghUsername = null;
-
             const urlParams = new URLSearchParams(window.location.search);
             const transitToken = urlParams.get('ghtoken');
             const oauthError = urlParams.get('ghuser_error');
@@ -382,8 +380,18 @@ const App = (() => {
                 hidePreloader();
                 return;
             }
+        }
 
-            // Match against platform users
+        // ============================================
+        // STEP 2: Carica utenti (ora il token è già in localStorage per DynamoDB)
+        // ============================================
+        await DataManager.loadUsers();
+        const users = DataManager.getUsers();
+
+        // ============================================
+        // STEP 3: Matching utente e autorizzazione
+        // ============================================
+        if (SSO_CONFIG.enabled) {
             const ssoUser = DataManager.findUserByGitHub(ghUsername);
             if (ssoUser) {
                 ssoAuthenticated = true;
