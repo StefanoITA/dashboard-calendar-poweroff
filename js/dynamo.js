@@ -44,13 +44,24 @@ const DynamoService = (() => {
     }
 
     // ============================================
-    // Auth header: token dalla sessione corrente
+    // Auth: token dalla sessione corrente
     // ============================================
+    function _getToken() {
+        return localStorage.getItem('shutdownScheduler_gheToken') || '';
+    }
+
     function _getAuthHeaders() {
-        const token = localStorage.getItem('shutdownScheduler_gheToken');
+        const token = _getToken();
         const headers = { 'Content-Type': 'application/json' };
         if (token) headers['Authorization'] = `Bearer ${token}`;
         return headers;
+    }
+
+    // Inietta _token nel body come fallback (API GW potrebbe strippare l'header Authorization)
+    function _withToken(bodyObj) {
+        const token = _getToken();
+        if (token) bodyObj['_token'] = token;
+        return bodyObj;
     }
 
     // ============================================
@@ -112,7 +123,7 @@ const DynamoService = (() => {
             const response = await fetch(`${CONFIG.endpoint}/schedules/fetch`, {
                 method: 'POST',
                 headers: _getAuthHeaders(),
-                body: JSON.stringify({ keys })
+                body: JSON.stringify(_withToken({ keys }))
             });
             if (response.status === 401 || response.status === 403) {
                 const err = await response.json().catch(() => ({}));
@@ -131,7 +142,7 @@ const DynamoService = (() => {
             const response = await fetch(`${CONFIG.endpoint}/schedules/save`, {
                 method: 'POST',
                 headers: _getAuthHeaders(),
-                body: JSON.stringify({ key, data })
+                body: JSON.stringify(_withToken({ key, data }))
             });
             if (response.status === 401 || response.status === 403) {
                 const err = await response.json().catch(() => ({}));
@@ -163,7 +174,9 @@ const DynamoService = (() => {
     // Fetch utenti da DynamoDB (per loadUsers con source 'dynamodb')
     async function fetchUsers() {
         if (!CONFIG.enabled) return null;
-        const response = await fetch(`${CONFIG.endpoint}/users`, {
+        const token = _getToken();
+        const url = token ? `${CONFIG.endpoint}/users?token=${encodeURIComponent(token)}` : `${CONFIG.endpoint}/users`;
+        const response = await fetch(url, {
             method: 'GET',
             headers: _getAuthHeaders()
         });
@@ -179,7 +192,9 @@ const DynamoService = (() => {
     // Fetch profilo utente corrente
     async function fetchCurrentUser() {
         if (!CONFIG.enabled) return null;
-        const response = await fetch(`${CONFIG.endpoint}/users/me`, {
+        const token = _getToken();
+        const url = token ? `${CONFIG.endpoint}/users/me?token=${encodeURIComponent(token)}` : `${CONFIG.endpoint}/users/me`;
+        const response = await fetch(url, {
             method: 'GET',
             headers: _getAuthHeaders()
         });
@@ -193,7 +208,7 @@ const DynamoService = (() => {
         const response = await fetch(`${CONFIG.endpoint}/users`, {
             method: 'POST',
             headers: _getAuthHeaders(),
-            body: JSON.stringify({ user: userData })
+            body: JSON.stringify(_withToken({ user: userData }))
         });
         if (!response.ok) {
             const err = await response.json().catch(() => ({}));
@@ -204,7 +219,11 @@ const DynamoService = (() => {
 
     // Elimina utente (solo Admin)
     async function deleteUser(userId) {
-        const response = await fetch(`${CONFIG.endpoint}/users/${encodeURIComponent(userId)}`, {
+        const token = _getToken();
+        const url = token
+            ? `${CONFIG.endpoint}/users/${encodeURIComponent(userId)}?token=${encodeURIComponent(token)}`
+            : `${CONFIG.endpoint}/users/${encodeURIComponent(userId)}`;
+        const response = await fetch(url, {
             method: 'DELETE',
             headers: _getAuthHeaders()
         });
