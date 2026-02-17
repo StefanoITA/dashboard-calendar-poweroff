@@ -47,20 +47,28 @@ const DynamoService = (() => {
     // Auth: token dalla sessione corrente
     // ============================================
     function _getToken() {
-        return localStorage.getItem('shutdownScheduler_gheToken') || '';
+        const token = localStorage.getItem('shutdownScheduler_gheToken') || '';
+        console.debug('[DynamoDB] _getToken:', token ? `found (${token.length} chars)` : 'EMPTY — token non presente in localStorage');
+        return token;
     }
 
     function _getAuthHeaders() {
         const token = _getToken();
         const headers = { 'Content-Type': 'application/json' };
         if (token) headers['Authorization'] = `Bearer ${token}`;
+        console.debug('[DynamoDB] _getAuthHeaders:', token ? 'Authorization header aggiunto' : 'NESSUN Authorization header — token vuoto');
         return headers;
     }
 
     // Inietta _token nel body come fallback (API GW potrebbe strippare l'header Authorization)
     function _withToken(bodyObj) {
         const token = _getToken();
-        if (token) bodyObj['_token'] = token;
+        if (token) {
+            bodyObj['_token'] = token;
+            console.debug('[DynamoDB] _withToken: _token aggiunto al body');
+        } else {
+            console.warn('[DynamoDB] _withToken: NESSUN token disponibile — body senza _token');
+        }
         return bodyObj;
     }
 
@@ -118,12 +126,16 @@ const DynamoService = (() => {
 
     // Fetch schedules for multiple app_env keys (authenticated + retry)
     async function fetchAll(keys) {
-        if (!CONFIG.enabled) return null;
+        if (!CONFIG.enabled) { console.debug('[DynamoDB] fetchAll: CONFIG.enabled=false, skip'); return null; }
+        console.debug('[DynamoDB] fetchAll: invocato con', keys.length, 'chiavi, endpoint:', CONFIG.endpoint);
         return withRetry(async () => {
+            const headers = _getAuthHeaders();
+            const body = _withToken({ keys });
+            console.debug('[DynamoDB] fetchAll: headers keys=', Object.keys(headers), ', body keys=', Object.keys(body), ', has _token=', '_token' in body);
             const response = await fetch(`${CONFIG.endpoint}/schedules/fetch`, {
                 method: 'POST',
-                headers: _getAuthHeaders(),
-                body: JSON.stringify(_withToken({ keys }))
+                headers,
+                body: JSON.stringify(body)
             });
             if (response.status === 401 || response.status === 403) {
                 const err = await response.json().catch(() => ({}));
