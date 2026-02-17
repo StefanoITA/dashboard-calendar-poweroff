@@ -52,14 +52,41 @@ MAX_RETRIES = 3             # numero massimo di retry per richieste a GHE
 _request_id = "-"
 
 
+import re
+
+# Pattern per dati sensibili nei log (token, secret, code)
+_SENSITIVE_PATTERNS = [
+    (re.compile(r'(access_token[=:"\s]+)[^\s&",}]+', re.I), r'\1***REDACTED***'),
+    (re.compile(r'(token[=:"\s]+)(gho_|ghp_|ghu_)[^\s&",}]+', re.I), r'\1***REDACTED***'),
+    (re.compile(r'(code[=:"\s]+)[a-f0-9]{10,}', re.I), r'\1***REDACTED***'),
+    (re.compile(r'(client_secret[=:"\s]+)[^\s&",}]+', re.I), r'\1***REDACTED***'),
+    (re.compile(r'(Authorization[=:"\s]+token\s+)[^\s&",}]+', re.I), r'\1***REDACTED***'),
+]
+
+
+def _redact(value):
+    """Rimuovi dati sensibili (token, secret, code) da stringhe per log sicuri."""
+    if not isinstance(value, str):
+        value = str(value)
+    for pattern, replacement in _SENSITIVE_PATTERNS:
+        value = pattern.sub(replacement, value)
+    return value
+
+
 def _log(level, message, **extra):
-    """Log strutturato JSON per CloudWatch Logs Insights."""
+    """Log strutturato JSON per CloudWatch Logs Insights. Redacts sensitive data."""
     entry = {
         "level": level,
         "message": message,
         "request_id": _request_id,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
+    # Redact sensitive fields
+    for k, v in extra.items():
+        if isinstance(v, str) and len(v) > 20:
+            extra[k] = _redact(v)
+        elif isinstance(v, dict):
+            extra[k] = {dk: _redact(str(dv)) if isinstance(dv, str) and len(dv) > 10 else dv for dk, dv in v.items()}
     entry.update(extra)
     print(json.dumps(entry, default=str))
 
@@ -100,7 +127,7 @@ def _make_token(payload):
 
 def _verify_token(token_str):
     if not token_str or "." not in token_str:
-        _log("DEBUG", "Token formato non valido", token_preview=token_str[:20] if token_str else "empty")
+        _log("DEBUG", "Token formato non valido", token_length=len(token_str) if token_str else 0)
         return None
     parts = token_str.split(".", 1)
     if len(parts) != 2:
@@ -250,15 +277,15 @@ def _http_request(url, data=None, headers=None, method="GET", max_retries=MAX_RE
                 raw = resp.read().decode("utf-8")
                 _log("INFO", "HTTP response OK",
                      status=status, elapsed_ms=elapsed,
-                     body_length=len(raw), body_preview=raw[:500],
-                     response_headers=resp_headers, attempt=attempt + 1)
+                     body_length=len(raw), body_preview=_redact(raw[:500]),
+                     content_type=resp_headers.get("Content-Type", "unknown"),
+                     attempt=attempt + 1)
 
                 # GHE token endpoint può ritornare form-encoded (access_token=xxx&token_type=bearer)
                 if raw.startswith("{") or raw.startswith("["):
                     return json.loads(raw)
                 elif "=" in raw and "&" in raw:
-                    _log("INFO", "Risposta form-encoded, parsing come query string",
-                         raw_response=raw[:500])
+                    _log("INFO", "Risposta form-encoded, parsing come query string")
                     parsed = urllib.parse.parse_qs(raw, keep_blank_values=True)
                     return {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
                 else:
@@ -379,14 +406,12 @@ def _extract_query_params(event):
     - ALB                      → queryStringParameters, multiValueQueryStringParameters
     - Fallback                 → rawPath con ?query, headers
     """
-    # Log completo dell'evento per debug (prima di processare)
-    _log("DEBUG", "Estrazione query params - evento completo",
+    _log("DEBUG", "Estrazione query params",
          event_keys=list(event.keys()),
-         queryStringParameters=event.get("queryStringParameters"),
-         rawQueryString=event.get("rawQueryString"),
+         has_queryStringParameters=bool(event.get("queryStringParameters")),
+         has_rawQueryString=bool(event.get("rawQueryString")),
          rawPath=event.get("rawPath"),
-         path=event.get("path"),
-         headers_keys=list(event.get("headers", {}).keys()) if event.get("headers") else None)
+         path=event.get("path"))
 
     # 1. rawQueryString FIRST (Lambda Function URL / HTTP API v2) — es. "code=abc123&state=xyz"
     # Diamo priorità a questo perché è la fonte più affidabile per Function URLs
@@ -394,20 +419,20 @@ def _extract_query_params(event):
     if raw_qs and raw_qs.strip():
         parsed = urllib.parse.parse_qs(raw_qs, keep_blank_values=True)
         result = {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
-        _log("INFO", "Query params da rawQueryString", raw=raw_qs, parsed_keys=list(result.keys()), values=result)
+        _log("INFO", "Query params da rawQueryString", param_count=len(result), parsed_keys=list(result.keys()))
         return result
 
     # 2. Sorgente standard: queryStringParameters (dict)
     params = event.get("queryStringParameters")
     if params and isinstance(params, dict) and len(params) > 0:
-        _log("DEBUG", "Query params da queryStringParameters", params_keys=list(params.keys()), values=params)
+        _log("DEBUG", "Query params da queryStringParameters", params_keys=list(params.keys()), param_count=len(params))
         return params
 
     # 3. multiValueQueryStringParameters (API Gateway v1 / ALB)
     multi = event.get("multiValueQueryStringParameters")
     if multi and isinstance(multi, dict) and len(multi) > 0:
         result = {k: v[0] if isinstance(v, list) and len(v) == 1 else v for k, v in multi.items()}
-        _log("INFO", "Query params da multiValueQueryStringParameters", parsed_keys=list(result.keys()), values=result)
+        _log("INFO", "Query params da multiValueQueryStringParameters", parsed_keys=list(result.keys()), param_count=len(result))
         return result
 
     # 4. Fallback: prova a estrarre da rawPath o path
@@ -444,16 +469,15 @@ def _extract_query_params(event):
 
     _log("ERROR", "NESSUN query parameter trovato in NESSUNA sorgente",
          has_queryStringParameters=("queryStringParameters" in event),
-         queryStringParameters_value=str(event.get("queryStringParameters")),
+         queryStringParameters_type=type(event.get("queryStringParameters")).__name__,
          has_rawQueryString=("rawQueryString" in event),
-         rawQueryString_value=str(event.get("rawQueryString", "")),
-         rawQueryString_repr=repr(event.get("rawQueryString", "")),
+         rawQueryString_length=len(event.get("rawQueryString", "")),
          has_rawPath=("rawPath" in event),
          rawPath_value=str(event.get("rawPath", "")),
          has_path=("path" in event),
          path_value=str(event.get("path", "")),
          has_multiValue=("multiValueQueryStringParameters" in event),
-         full_event_json=json.dumps(event, default=str)[:2000])
+         event_keys=list(event.keys()))
     return {}
 
 
@@ -464,18 +488,19 @@ def lambda_handler(event, context):
     global _request_id
     _request_id = getattr(context, "aws_request_id", "-") if context else "-"
 
-    # Log evento completo (senza body per non esporre token)
-    safe_event = {k: v for k, v in event.items() if k != "body"}
     _log("INFO", "Lambda invocata",
          event_keys=list(event.keys()),
-         queryStringParameters=str(event.get("queryStringParameters"))[:200],
-         rawQueryString=event.get("rawQueryString", "N/A"),
          rawPath=event.get("rawPath", "N/A"),
-         path=event.get("path", "N/A"),
          httpMethod=event.get("httpMethod", "N/A"),
-         requestContext_http=event.get("requestContext", {}).get("http", {}),
-         isBase64Encoded=event.get("isBase64Encoded", "N/A"),
-         event=safe_event)
+         request_method=event.get("requestContext", {}).get("http", {}).get("method", "N/A"),
+         has_queryStringParameters=bool(event.get("queryStringParameters")),
+         has_rawQueryString=bool(event.get("rawQueryString")),
+         has_body=bool(event.get("body")))
+
+    # Ignora richieste favicon.ico (browser le fa automaticamente)
+    raw_path = event.get("rawPath", "") or event.get("path", "")
+    if "favicon" in raw_path.lower():
+        return {"statusCode": 204, "body": ""}
 
     # Valida configurazione
     if not _validate_config():
@@ -531,9 +556,8 @@ def _handle_oauth(event, context=None):
 
     _log("INFO", "OAuth GET ricevuto",
          has_code=bool(code), has_state=bool(state),
-         code_preview=code[:8] + "..." if code else "null",
-         params_keys=list(params.keys()),
-         params=params)
+         code_length=len(code) if code else 0,
+         params_keys=list(params.keys()))
 
     if not code:
         _log("WARN", "Parametro 'code' mancante", params=params)
@@ -552,7 +576,7 @@ def _handle_oauth(event, context=None):
         return _error_redirect(redirect_url, "Configurazione OAuth incompleta nel server")
 
     _log("INFO", "Inizio scambio OAuth code → access_token",
-         ghe_base=ghe_base, client_id=client_id, code_preview=code[:8] + "...",
+         ghe_base=ghe_base, code_length=len(code),
          lambda_remaining_ms=int(context.get_remaining_time_in_millis()) if context and hasattr(context, 'get_remaining_time_in_millis') else "N/A")
 
     # === Step 1: Scambia code → access_token ===
@@ -572,8 +596,7 @@ def _handle_oauth(event, context=None):
              elapsed_ms=step1_ms,
              response_keys=list(token_data.keys()) if isinstance(token_data, dict) else "not_dict",
              has_access_token="access_token" in token_data if isinstance(token_data, dict) else False,
-             has_error="error" in token_data if isinstance(token_data, dict) else False,
-             full_response=str(token_data)[:1000])
+             has_error="error" in token_data if isinstance(token_data, dict) else False)
 
     except RuntimeError as e:
         step1_ms = round((time.time() - t_step1) * 1000, 1)
@@ -592,7 +615,7 @@ def _handle_oauth(event, context=None):
         else:
             err = f"Risposta inattesa: {str(token_data)[:200]}"
         _log("ERROR", "Step 1 FALLITO: access_token assente nella risposta",
-             error=err, full_response=str(token_data)[:2000],
+             error=err, response_keys=list(token_data.keys()) if isinstance(token_data, dict) else "not_dict",
              response_type=type(token_data).__name__)
         return _error_redirect(redirect_url, err)
 
@@ -673,9 +696,7 @@ def _handle_verify(event):
         _log("WARN", "Token mancante nel body", body_keys=list(body.keys()))
         return _json_response(400, {"error": "Token mancante"})
 
-    _log("INFO", "Verifica token",
-         token_length=len(token_str),
-         token_preview=token_str[:20] + "...")
+    _log("INFO", "Verifica token", token_length=len(token_str))
 
     payload = _verify_token(token_str)
     if payload is None:

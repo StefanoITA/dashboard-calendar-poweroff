@@ -94,20 +94,11 @@ const App = (() => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ token })
             });
-            if (resp.status === 401) {
-                // Token esplicitamente rifiutato → sessione scaduta/invalida
-                return { rejected: true };
-            }
-            if (!resp.ok) {
-                // Errore server (5xx) → non è colpa del token
-                console.warn('[SSO] Lambda error (server-side):', resp.status);
-                return { network_error: true };
-            }
+            if (!resp.ok) return null;
             return await resp.json();
         } catch (err) {
-            // Errore rete/timeout → Lambda irraggiungibile
-            console.warn('[SSO] Lambda irraggiungibile:', err.message);
-            return { network_error: true };
+            console.error('[SSO] Token verify failed:', err.message);
+            return null;
         }
     }
 
@@ -378,19 +369,7 @@ const App = (() => {
                         ghUsername = result.login;
                         localStorage.setItem(SSO_STORAGE_KEY, ghUsername);
                         log('[SSO] Session restored:', ghUsername);
-                    } else if (result && result.network_error) {
-                        // Lambda irraggiungibile — NON cancellare la sessione!
-                        // Usa lo username salvato per non bloccare l'utente
-                        const savedLogin = localStorage.getItem(SSO_STORAGE_KEY);
-                        if (savedLogin) {
-                            ghUsername = savedLogin;
-                            console.warn('[SSO] Lambda non raggiungibile, sessione mantenuta offline per:', ghUsername);
-                        } else {
-                            // Nessuno username salvato, non possiamo procedere
-                            log('[SSO] Lambda non raggiungibile e nessuna sessione locale');
-                        }
                     } else {
-                        // Token esplicitamente rifiutato (401) o risposta vuota
                         clearSSOSession();
                         log('[SSO] Session expired, re-authentication needed');
                     }
@@ -2756,7 +2735,6 @@ const App = (() => {
                     <span class="save-hostname-name">${hostname}</span>
                     ${changeType}
                     ${entryDetail}
-                    <button class="save-delete-btn" data-hostname="${hostname}" data-app="${c.app}" data-env="${c.env}" title="Rimuovi da questo salvataggio">&times;</button>
                 </div>`;
             });
 
@@ -2781,36 +2759,24 @@ const App = (() => {
             confirmClass: 'btn-primary',
             wide: true,
             onMount: (overlay) => {
-                // Hostname-level deletion (rimuove tutte le entry per un hostname)
-                overlay.querySelectorAll('.save-delete-btn').forEach(btn => {
-                    btn.addEventListener('click', async (e) => {
-                        e.stopPropagation();
-                        const h = btn.dataset.hostname;
-                        const app = btn.dataset.app;
-                        const env = btn.dataset.env;
-                        DataManager.removeAllSchedules(app, env, h);
-                        AuditLog.log('Eliminazione hostname da salvataggio', `${app} / ${env} / ${h}`);
-                        btn.closest('.save-hostname-row').remove();
-                        showToast(`Rimosso: ${h}`, 'info');
-                    });
-                });
-
-                // Entry-level deletion (rimuove singola entry)
+                // Entry-level deletion con conferma
                 overlay.querySelectorAll('.save-delete-entry-btn').forEach(btn => {
-                    btn.addEventListener('click', async (e) => {
+                    btn.addEventListener('click', (e) => {
                         e.stopPropagation();
                         const entryId = btn.dataset.entryId;
                         const hostname = btn.dataset.hostname;
                         const app = btn.dataset.app;
                         const env = btn.dataset.env;
 
-                        // Rimuovi entry usando metodo esistente
+                        if (!confirm(`Vuoi eliminare questa entry per ${hostname}?`)) return;
+
+                        // Rimuovi entry dai dati
                         DataManager.removeScheduleEntry(app, env, hostname, entryId);
                         AuditLog.log('Eliminazione entry da save modal', `${app}/${env}/${hostname} - Entry ${entryId}`);
 
-                        // Rimuovi visivamente l'entry
+                        // Rimuovi visivamente l'entry dal popup
                         const entryDiv = btn.closest('.save-entry-detail');
-                        entryDiv.remove();
+                        if (entryDiv) entryDiv.remove();
 
                         // Se non ci sono più entry per questo hostname, rimuovi l'intera riga
                         const hostnameRow = overlay.querySelector(`[data-save-hostname="${hostname}"][data-save-app="${app}"][data-save-env="${env}"]`);
@@ -2818,7 +2784,22 @@ const App = (() => {
                             hostnameRow.remove();
                         }
 
-                        // Ricalcola change count e chiudi modal se non ci sono più modifiche
+                        // Se un intero gruppo app/env è vuoto, rimuovilo
+                        overlay.querySelectorAll('.save-changes-group').forEach(group => {
+                            if (group.querySelectorAll('.save-hostname-row').length === 0) {
+                                group.remove();
+                            }
+                        });
+
+                        // Aggiorna la vista dietro il popup
+                        if (currentApp && currentEnv) {
+                            renderMachines(currentApp, currentEnv);
+                        }
+
+                        // Aggiorna stato bottone salva (badge, colore, disabled)
+                        updateChangesBadge();
+
+                        // Ricalcola e chiudi modal se non ci sono più modifiche
                         const remaining = DynamoService.getModifiedAppEnvs(DataManager.getSchedulesRef());
                         if (remaining.length === 0) {
                             overlay.remove();
