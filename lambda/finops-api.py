@@ -539,6 +539,7 @@ def _handle_schedules_fetch(event, user):
     _log("INFO", "Schedules fetch", key_count=len(keys), user_id=user.get("user_id"))
 
     items = {}
+    meta = {}
     for key in keys:
         app, env = _parse_key(key)
         # Verifica che l'utente possa accedere a questa app (almeno ro)
@@ -558,6 +559,10 @@ def _handle_schedules_fetch(event, user):
                  http_status=resp.get("ResponseMetadata", {}).get("HTTPStatusCode"))
             if item:
                 items[key] = item.get("schedules", {})
+                meta[key] = {
+                    "last_modified_by": item.get("last_modified_by"),
+                    "last_modified_at": item.get("last_modified_at"),
+                }
             else:
                 items[key] = {}
         except Exception as e:
@@ -567,7 +572,7 @@ def _handle_schedules_fetch(event, user):
                  traceback=traceback.format_exc())
             items[key] = {}
 
-    return _response(200, {"items": items})
+    return _response(200, {"items": items, "meta": meta})
 
 
 # ============================================
