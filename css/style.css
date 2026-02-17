@@ -3330,6 +3330,83 @@ body:not(.is-admin) #exportBtn { display: none !important; }
     flex-shrink: 0;
 }
 
+/* ============================================
+   Refresh Confirmation Tooltip
+   ============================================ */
+.refresh-confirm-tooltip {
+    position: fixed;
+    z-index: 10001;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
+    width: 260px;
+    opacity: 0;
+    transform: translateY(-6px);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+    pointer-events: none;
+}
+
+.refresh-confirm-tooltip.show {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+
+.refresh-confirm-icon {
+    color: #d97706;
+    margin-bottom: 8px;
+}
+
+.refresh-confirm-text {
+    font-size: 0.82rem;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    margin-bottom: 14px;
+}
+
+.refresh-confirm-text strong {
+    color: var(--text-primary);
+}
+
+.refresh-confirm-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.refresh-confirm-cancel,
+.refresh-confirm-ok {
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    transition: all 0.15s;
+}
+
+.refresh-confirm-cancel {
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+}
+
+.refresh-confirm-cancel:hover {
+    background: var(--hover-bg);
+}
+
+.refresh-confirm-ok {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+}
+
+.refresh-confirm-ok:hover {
+    opacity: 0.9;
+}
+
 .user-mgmt-table thead th {
     padding: 10px 14px;
     text-align: left;

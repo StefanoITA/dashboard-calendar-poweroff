@@ -2845,7 +2845,8 @@ const App = (() => {
                     <div class="user-edit-row">
                         <div class="user-edit-field">
                             <label>GitHub Username</label>
-                            <input type="text" id="ueGithub" value="${existingUser ? (existingUser.github_user || '') : ''}" placeholder="es. mario-rossi">
+                            <input type="text" id="ueGithub" value="${existingUser ? (existingUser.github_user || '') : ''}" placeholder="es. mario-rossi" ${!isNew && existingUser && existingUser.role === 'Admin' ? 'readonly style="opacity:0.6;cursor:not-allowed;"' : ''}>
+                            ${!isNew && existingUser && existingUser.role === 'Admin' ? '<small style="color:var(--text-tertiary);font-size:0.72rem;">Il GitHub username degli admin non \u00e8 modificabile</small>' : ''}
                         </div>
                         <div class="user-edit-field">
                             <label>Ruolo</label>
@@ -2937,12 +2938,15 @@ const App = (() => {
 
         renderAppPerms();
 
-        // Role change: if Admin, hide app perms
+        // Role change: if Admin or Read-Only, hide app perms (both get all apps)
         const roleSelect = overlay.querySelector('#ueRole');
         const appPermsSection = overlay.querySelector('#ueAppPermsSection');
+        const specialPermsSection = overlay.querySelector('#uePermVMList')?.closest('.user-edit-field');
         const updateRoleUI = () => {
             const role = roleSelect.value;
-            appPermsSection.style.display = role === 'Admin' ? 'none' : '';
+            const hideApps = role === 'Admin' || role === 'Read-Only';
+            appPermsSection.style.display = hideApps ? 'none' : '';
+            if (specialPermsSection) specialPermsSection.style.display = hideApps ? 'none' : '';
         };
         updateRoleUI();
         roleSelect.addEventListener('change', updateRoleUI);
@@ -2962,7 +2966,9 @@ const App = (() => {
         overlay.querySelector('#ueSaveBtn').addEventListener('click', async () => {
             const userId = overlay.querySelector('#ueUserId').value.trim();
             const name = overlay.querySelector('#ueName').value.trim();
-            const github = overlay.querySelector('#ueGithub').value.trim();
+            // If editing an admin, force original github_user (prevent identity change)
+            const isTargetAdmin = !isNew && existingUser && existingUser.role === 'Admin';
+            const github = isTargetAdmin ? existingUser.github_user : overlay.querySelector('#ueGithub').value.trim();
             // If editing self, force original role (prevent lockout)
             const role = isSelf && existingUser ? existingUser.role : overlay.querySelector('#ueRole').value;
 
@@ -2974,6 +2980,9 @@ const App = (() => {
             // Build applications object
             let applications;
             if (role === 'Admin') {
+                applications = ['*'];
+            } else if (role === 'Read-Only') {
+                // Read-Only gets automatic RO access to ALL apps via ["*"]
                 applications = ['*'];
             } else {
                 applications = {};
@@ -3045,12 +3054,80 @@ const App = (() => {
     }
 
     // ============================================
+    // Refresh Confirmation Tooltip
+    // ============================================
+    function showRefreshConfirm() {
+        return new Promise(resolve => {
+            // Remove any existing tooltip
+            const existing = document.querySelector('.refresh-confirm-tooltip');
+            if (existing) { existing.remove(); resolve(false); return; }
+
+            const refreshBtn = $('#refreshBtn');
+            const rect = refreshBtn.getBoundingClientRect();
+
+            const tooltip = document.createElement('div');
+            tooltip.className = 'refresh-confirm-tooltip';
+            tooltip.innerHTML = `
+                <div class="refresh-confirm-icon">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                </div>
+                <div class="refresh-confirm-text">
+                    Hai modifiche non salvate.<br>
+                    <strong>Andranno perse.</strong> Continuare?
+                </div>
+                <div class="refresh-confirm-actions">
+                    <button class="refresh-confirm-cancel">Annulla</button>
+                    <button class="refresh-confirm-ok">Aggiorna</button>
+                </div>`;
+            document.body.appendChild(tooltip);
+
+            // Position below the refresh button
+            const tooltipRect = tooltip.getBoundingClientRect();
+            tooltip.style.top = (rect.bottom + 8) + 'px';
+            tooltip.style.right = (window.innerWidth - rect.right) + 'px';
+
+            requestAnimationFrame(() => tooltip.classList.add('show'));
+
+            const cleanup = (result) => {
+                tooltip.classList.remove('show');
+                setTimeout(() => tooltip.remove(), 150);
+                document.removeEventListener('click', outsideClick);
+                resolve(result);
+            };
+
+            tooltip.querySelector('.refresh-confirm-cancel').addEventListener('click', (e) => {
+                e.stopPropagation();
+                cleanup(false);
+            });
+            tooltip.querySelector('.refresh-confirm-ok').addEventListener('click', (e) => {
+                e.stopPropagation();
+                cleanup(true);
+            });
+
+            const outsideClick = (e) => {
+                if (!tooltip.contains(e.target) && e.target !== refreshBtn) {
+                    cleanup(false);
+                }
+            };
+            setTimeout(() => document.addEventListener('click', outsideClick), 10);
+        });
+    }
+
+    // ============================================
     // Refresh / Fetch State
     // ============================================
     let isRefreshing = false;
 
     async function handleRefresh() {
         if (isRefreshing) return;
+
+        // Check for unsaved changes — show confirmation tooltip
+        const pendingChanges = DynamoService.getModifiedAppEnvs(DataManager.getSchedulesRef());
+        if (pendingChanges.length > 0) {
+            const proceed = await showRefreshConfirm();
+            if (!proceed) return;
+        }
+
         isRefreshing = true;
         const refreshBtn = $('#refreshBtn');
         refreshBtn.classList.add('spinning');
