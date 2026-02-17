@@ -20,6 +20,7 @@ import hashlib
 import hmac
 import json
 import os
+import socket
 import ssl
 import time
 import traceback
@@ -38,11 +39,11 @@ REDIRECT_URL = os.environ.get("REDIRECT_URL", "")
 _parsed = urllib.parse.urlparse(REDIRECT_URL) if REDIRECT_URL else None
 CORS_ORIGIN = f"{_parsed.scheme}://{_parsed.netloc}" if _parsed and _parsed.scheme else "*"
 
-TRANSIT_TTL = 300       # 5 minuti
-SESSION_TTL = 28800     # 8 ore
-HTTP_TIMEOUT = 15       # secondi per richieste a GHE
-MAX_RETRIES = 3         # numero massimo di retry per richieste a GHE
-RETRY_BACKOFF = 2       # moltiplicatore per backoff esponenziale
+TRANSIT_TTL = 300           # 5 minuti
+SESSION_TTL = 2592000       # 30 giorni
+HTTP_TIMEOUT = 7            # secondi per singola richiesta (3 retry × 7s = 21s max)
+MAX_RETRIES = 3             # numero massimo di retry per richieste a GHE
+# NESSUN backoff: lambda ha 30s timeout, ogni ms conta
 
 
 # ============================================
@@ -142,8 +143,78 @@ def _get_ssl_context():
     return None
 
 
+def _diagnose_connection(url):
+    """Diagnostica connessione: DNS + TCP + SSL per capire DOVE si blocca."""
+    parsed = urllib.parse.urlparse(url)
+    host = parsed.hostname
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    diag = {"host": host, "port": port}
+
+    # Step A: DNS resolution
+    t0 = time.time()
+    try:
+        addrs = socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        diag["dns_ms"] = round((time.time() - t0) * 1000, 1)
+        diag["dns_results"] = len(addrs)
+        diag["dns_ip"] = addrs[0][4][0] if addrs else "none"
+    except Exception as e:
+        diag["dns_ms"] = round((time.time() - t0) * 1000, 1)
+        diag["dns_error"] = str(e)
+        _log("ERROR", "DNS resolution fallita", **diag)
+        return diag
+
+    # Step B: TCP connect
+    t1 = time.time()
+    sock = None
+    try:
+        sock = socket.create_connection((host, port), timeout=5)
+        diag["tcp_ms"] = round((time.time() - t1) * 1000, 1)
+        diag["tcp_ok"] = True
+    except Exception as e:
+        diag["tcp_ms"] = round((time.time() - t1) * 1000, 1)
+        diag["tcp_error"] = str(e)
+        _log("ERROR", "TCP connect fallito", **diag)
+        return diag
+
+    # Step C: SSL handshake (se HTTPS)
+    if parsed.scheme == "https":
+        t2 = time.time()
+        try:
+            ssl_verify = os.environ.get("SSL_VERIFY", "true").lower()
+            if ssl_verify == "false":
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+            else:
+                ctx = ssl.create_default_context()
+            wrapped = ctx.wrap_socket(sock, server_hostname=host)
+            diag["ssl_ms"] = round((time.time() - t2) * 1000, 1)
+            diag["ssl_ok"] = True
+            diag["ssl_version"] = wrapped.version()
+            wrapped.close()
+        except Exception as e:
+            diag["ssl_ms"] = round((time.time() - t2) * 1000, 1)
+            diag["ssl_error"] = str(e)
+            _log("ERROR", "SSL handshake fallito", **diag)
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+            return diag
+    else:
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+    _log("INFO", "Diagnostica connessione completata", **diag)
+    return diag
+
+
 def _http_request(url, data=None, headers=None, method="GET", max_retries=MAX_RETRIES):
-    """Esegue richiesta HTTP con gestione errori completa e retry automatico."""
+    """Esegue richiesta HTTP con retry IMMEDIATI (no backoff — lambda ha 30s timeout)."""
     headers = headers or {}
     log_url = url.split("?")[0]  # non loggare query string con secrets
 
@@ -153,87 +224,116 @@ def _http_request(url, data=None, headers=None, method="GET", max_retries=MAX_RE
     headers.setdefault("Accept", "application/json")
 
     last_exception = None
+    last_body = ""
 
     for attempt in range(max_retries):
+        t_start = time.time()
         try:
-            _log("DEBUG", "HTTP request", method=method, url=log_url,
-                 has_data=data is not None, headers_keys=list(headers.keys()),
-                 attempt=attempt + 1, max_retries=max_retries)
+            _log("INFO", f"HTTP request attempt {attempt + 1}/{max_retries}",
+                 method=method, url=log_url, timeout=HTTP_TIMEOUT,
+                 has_data=data is not None, headers_keys=list(headers.keys()))
+
+            # Diagnostica connessione al PRIMO tentativo e dopo timeout
+            if attempt == 0 or (last_exception and isinstance(last_exception, (TimeoutError, socket.timeout))):
+                diag = _diagnose_connection(url)
+                if "dns_error" in diag or "tcp_error" in diag or "ssl_error" in diag:
+                    _log("ERROR", "Problema di connettività rilevato PRIMA della richiesta HTTP",
+                         diagnostics=diag, attempt=attempt + 1)
 
             req = urllib.request.Request(url, data=data, headers=headers, method=method)
             ctx = _get_ssl_context()
 
             with urllib.request.urlopen(req, context=ctx, timeout=HTTP_TIMEOUT) as resp:
+                elapsed = round((time.time() - t_start) * 1000, 1)
                 status = resp.status
+                resp_headers = dict(resp.getheaders())
                 raw = resp.read().decode("utf-8")
-                _log("DEBUG", "HTTP response", status=status, body_length=len(raw),
-                     body_preview=raw[:300], attempt=attempt + 1)
+                _log("INFO", "HTTP response OK",
+                     status=status, elapsed_ms=elapsed,
+                     body_length=len(raw), body_preview=raw[:500],
+                     response_headers=resp_headers, attempt=attempt + 1)
 
                 # GHE token endpoint può ritornare form-encoded (access_token=xxx&token_type=bearer)
-                # anche con Accept: application/json su alcune versioni
                 if raw.startswith("{") or raw.startswith("["):
                     return json.loads(raw)
                 elif "=" in raw and "&" in raw:
-                    _log("INFO", "Risposta form-encoded, parsing come query string")
+                    _log("INFO", "Risposta form-encoded, parsing come query string",
+                         raw_response=raw[:500])
                     parsed = urllib.parse.parse_qs(raw, keep_blank_values=True)
                     return {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
                 else:
-                    # Prova JSON comunque
-                    return json.loads(raw)
+                    # Risposta non riconosciuta — logga TUTTO per debug
+                    _log("WARN", "Risposta non JSON e non form-encoded",
+                         raw_body_full=raw[:2000],
+                         content_type=resp_headers.get("Content-Type", "unknown"))
+                    try:
+                        return json.loads(raw)
+                    except json.JSONDecodeError:
+                        raise RuntimeError(
+                            f"Risposta GHE non parsabile (status={status}, "
+                            f"content-type={resp_headers.get('Content-Type', '?')}): {raw[:500]}"
+                        )
 
         except urllib.error.HTTPError as e:
+            elapsed = round((time.time() - t_start) * 1000, 1)
             body = ""
             try:
                 body = e.read().decode("utf-8", errors="replace")
             except Exception:
                 pass
+            last_body = body
 
             # Non fare retry per errori client (4xx) tranne 429 (rate limit)
             if 400 <= e.code < 500 and e.code != 429:
-                _log("ERROR", "HTTP error da GHE (no retry)", status=e.code,
-                     reason=str(e.reason), url=log_url, response_body=body[:500])
-                raise RuntimeError(f"GHE HTTP {e.code}: {e.reason} — {body[:200]}") from e
+                _log("ERROR", "HTTP error da GHE (4xx, no retry)",
+                     status=e.code, reason=str(e.reason), url=log_url,
+                     elapsed_ms=elapsed,
+                     response_body_full=body[:2000],
+                     response_headers=dict(e.headers) if hasattr(e, 'headers') else {})
+                raise RuntimeError(f"GHE HTTP {e.code}: {e.reason} — {body[:500]}") from e
 
             last_exception = e
-            _log("WARN", f"HTTP error da GHE (attempt {attempt + 1}/{max_retries})",
+            _log("WARN", f"HTTP error (attempt {attempt + 1}/{max_retries}) — retry immediato",
                  status=e.code, reason=str(e.reason), url=log_url,
-                 response_body=body[:500])
+                 elapsed_ms=elapsed, response_body=body[:1000])
+            # NESSUN sleep — retry immediato
 
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+        except (urllib.error.URLError, TimeoutError, ConnectionError,
+                socket.timeout, OSError) as e:
+            elapsed = round((time.time() - t_start) * 1000, 1)
             last_exception = e
             error_msg = str(getattr(e, 'reason', e))
-            _log("WARN", f"Errore di rete/timeout (attempt {attempt + 1}/{max_retries})",
-                 url=log_url, error=error_msg, error_type=type(e).__name__)
+            _log("WARN", f"Rete/timeout (attempt {attempt + 1}/{max_retries}) — retry immediato",
+                 url=log_url, elapsed_ms=elapsed,
+                 error=error_msg, error_type=type(e).__name__,
+                 is_timeout=isinstance(e, (TimeoutError, socket.timeout)),
+                 timeout_config=HTTP_TIMEOUT)
+            # NESSUN sleep — retry immediato
 
         except json.JSONDecodeError as e:
-            # Errore di parsing JSON - non fare retry
             _log("ERROR", "Risposta GHE non è JSON valido", url=log_url, error=str(e))
             raise RuntimeError(f"Risposta GHE non parsabile: {e}") from e
 
-        # Se non è l'ultimo tentativo, aspetta con backoff esponenziale
-        if attempt < max_retries - 1:
-            wait_time = RETRY_BACKOFF ** attempt
-            _log("INFO", f"Retry dopo {wait_time}s", attempt=attempt + 1,
-                 max_retries=max_retries, wait_seconds=wait_time)
-            time.sleep(wait_time)
+    # === TUTTI I RETRY FALLITI — diagnostica completa ===
+    total_elapsed = "unknown"
+    _log("ERROR", "TUTTI I RETRY FALLITI — diagnostica finale",
+         url=log_url, total_attempts=max_retries,
+         last_error_type=type(last_exception).__name__ if last_exception else "none",
+         last_error=str(last_exception)[:500] if last_exception else "none",
+         last_response_body=last_body[:2000] if last_body else "none")
 
-    # Tutti i retry falliti
+    # Fai diagnostica di rete finale se era un timeout
+    if isinstance(last_exception, (TimeoutError, socket.timeout, urllib.error.URLError)):
+        _log("ERROR", "Esecuzione diagnostica rete finale post-fallimento")
+        _diagnose_connection(url)
+
     if isinstance(last_exception, urllib.error.HTTPError):
-        body = ""
-        try:
-            body = last_exception.read().decode("utf-8", errors="replace")
-        except Exception:
-            pass
-        _log("ERROR", "HTTP error da GHE (tutti i retry falliti)",
-             status=last_exception.code, reason=str(last_exception.reason),
-             url=log_url, response_body=body[:500], total_attempts=max_retries)
         raise RuntimeError(
-            f"GHE HTTP {last_exception.code} dopo {max_retries} tentativi: {last_exception.reason} — {body[:200]}"
+            f"GHE HTTP {last_exception.code} dopo {max_retries} tentativi: "
+            f"{last_exception.reason} — {last_body[:500]}"
         ) from last_exception
-    elif isinstance(last_exception, (urllib.error.URLError, TimeoutError, ConnectionError)):
+    elif last_exception:
         error_msg = str(getattr(last_exception, 'reason', last_exception))
-        _log("ERROR", "Errore di rete/timeout (tutti i retry falliti)",
-             url=log_url, error=error_msg, total_attempts=max_retries)
         raise RuntimeError(
             f"Errore rete GHE dopo {max_retries} tentativi: {error_msg}"
         ) from last_exception
@@ -407,7 +507,7 @@ def lambda_handler(event, context):
             return _handle_verify(event)
 
         # GET (default) — OAuth code exchange
-        return _handle_oauth(event)
+        return _handle_oauth(event, context)
 
     except Exception as e:
         _log("ERROR", "Errore non gestito nel handler",
@@ -418,7 +518,7 @@ def lambda_handler(event, context):
 # ============================================
 # GET: OAuth code → transit token → redirect
 # ============================================
-def _handle_oauth(event):
+def _handle_oauth(event, context=None):
     redirect_url = REDIRECT_URL
 
     if not redirect_url:
@@ -452,12 +552,14 @@ def _handle_oauth(event):
         return _error_redirect(redirect_url, "Configurazione OAuth incompleta nel server")
 
     _log("INFO", "Inizio scambio OAuth code → access_token",
-         ghe_base=ghe_base, client_id=client_id, code_preview=code[:8] + "...")
+         ghe_base=ghe_base, client_id=client_id, code_preview=code[:8] + "...",
+         lambda_remaining_ms=int(context.get_remaining_time_in_millis()) if context and hasattr(context, 'get_remaining_time_in_millis') else "N/A")
 
     # === Step 1: Scambia code → access_token ===
+    t_step1 = time.time()
     try:
         token_url = f"{ghe_base}/login/oauth/access_token"
-        _log("INFO", "Step 1: Token exchange", url=token_url)
+        _log("INFO", "Step 1: Token exchange → POST " + token_url.split("?")[0])
 
         token_data = _http_request(
             token_url,
@@ -465,15 +567,20 @@ def _handle_oauth(event):
             method="POST",
         )
 
-        _log("INFO", "Step 1 completato: risposta token endpoint",
+        step1_ms = round((time.time() - t_step1) * 1000, 1)
+        _log("INFO", "Step 1 completato",
+             elapsed_ms=step1_ms,
              response_keys=list(token_data.keys()) if isinstance(token_data, dict) else "not_dict",
              has_access_token="access_token" in token_data if isinstance(token_data, dict) else False,
-             has_error="error" in token_data if isinstance(token_data, dict) else False)
+             has_error="error" in token_data if isinstance(token_data, dict) else False,
+             full_response=str(token_data)[:1000])
 
     except RuntimeError as e:
-        _log("ERROR", "Step 1 fallito: errore nella richiesta token",
-             error=str(e), traceback=traceback.format_exc())
-        return _error_redirect(redirect_url, f"Errore contattando GHE: {e}")
+        step1_ms = round((time.time() - t_step1) * 1000, 1)
+        _log("ERROR", "Step 1 FALLITO",
+             elapsed_ms=step1_ms, error=str(e),
+             traceback=traceback.format_exc())
+        return _error_redirect(redirect_url, f"Token exchange fallito ({step1_ms}ms): {e}")
 
     access_token = token_data.get("access_token") if isinstance(token_data, dict) else None
     if not access_token:
@@ -483,9 +590,10 @@ def _handle_oauth(event):
                    or token_data.get("error")
                    or "Token non ricevuto")
         else:
-            err = f"Risposta inattesa: {str(token_data)[:100]}"
-        _log("ERROR", "Step 1 fallito: access_token non presente",
-             error=err, full_response=str(token_data)[:500])
+            err = f"Risposta inattesa: {str(token_data)[:200]}"
+        _log("ERROR", "Step 1 FALLITO: access_token assente nella risposta",
+             error=err, full_response=str(token_data)[:2000],
+             response_type=type(token_data).__name__)
         return _error_redirect(redirect_url, err)
 
     _log("INFO", "Step 1 OK: access_token ricevuto",
@@ -493,28 +601,33 @@ def _handle_oauth(event):
          scope=token_data.get("scope", "unknown"))
 
     # === Step 2: Ottieni profilo utente ===
+    t_step2 = time.time()
     try:
         user_url = f"{ghe_base}/api/v3/user"
-        _log("INFO", "Step 2: Fetch profilo utente", url=user_url)
+        _log("INFO", "Step 2: Fetch profilo utente → GET " + user_url)
 
         user_data = _http_request(
             user_url,
             headers={"Authorization": f"token {access_token}"},
         )
 
-        _log("INFO", "Step 2 completato: risposta user endpoint",
+        step2_ms = round((time.time() - t_step2) * 1000, 1)
+        _log("INFO", "Step 2 completato",
+             elapsed_ms=step2_ms,
              response_keys=list(user_data.keys()) if isinstance(user_data, dict) else "not_dict",
              login=user_data.get("login") if isinstance(user_data, dict) else None)
 
     except RuntimeError as e:
-        _log("ERROR", "Step 2 fallito: errore nella richiesta user",
-             error=str(e), traceback=traceback.format_exc())
-        return _error_redirect(redirect_url, f"Errore recupero profilo utente: {e}")
+        step2_ms = round((time.time() - t_step2) * 1000, 1)
+        _log("ERROR", "Step 2 FALLITO",
+             elapsed_ms=step2_ms, error=str(e),
+             traceback=traceback.format_exc())
+        return _error_redirect(redirect_url, f"Fetch profilo fallito ({step2_ms}ms): {e}")
 
     login = user_data.get("login") if isinstance(user_data, dict) else None
     if not login:
-        _log("ERROR", "Step 2 fallito: login non trovato nel profilo",
-             full_response=str(user_data)[:500])
+        _log("ERROR", "Step 2 FALLITO: login non trovato nel profilo",
+             full_response=str(user_data)[:2000])
         return _error_redirect(redirect_url, "Profilo utente non trovato nella risposta GHE")
 
     # === Step 3: Crea transit token firmato ===
