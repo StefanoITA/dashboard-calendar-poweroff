@@ -3293,6 +3293,43 @@ body:not(.is-admin) #exportBtn { display: none !important; }
     font-size: 0.82rem;
 }
 
+.user-mgmt-search-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    margin-bottom: 16px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+
+.user-mgmt-search-bar svg {
+    color: var(--text-tertiary);
+    flex-shrink: 0;
+}
+
+.user-mgmt-search-bar input {
+    flex: 1;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 0.88rem;
+    font-family: inherit;
+    outline: none;
+}
+
+.user-mgmt-search-bar input::placeholder {
+    color: var(--text-tertiary);
+}
+
+.user-mgmt-search-count {
+    font-size: 0.76rem;
+    color: var(--text-tertiary);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
 .user-mgmt-table thead th {
     padding: 10px 14px;
     text-align: left;

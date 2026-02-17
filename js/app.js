@@ -2635,13 +2635,10 @@ const App = (() => {
                     </button>
                 </div>
             </div>
-            <div class="vm-list-filters" style="margin-bottom:0;border-bottom:none;">
-                <div class="vm-filter-row">
-                    <div class="vm-filter-search-group">
-                        <input type="text" class="vm-filter-search" id="umSearchInput" placeholder="Cerca per nome, user ID, GitHub, ruolo...">
-                    </div>
-                    <span class="vm-filter-count" id="umUserCount"></span>
-                </div>
+            <div class="user-mgmt-search-bar">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" id="umSearchInput" placeholder="Cerca per nome, user ID, GitHub, ruolo...">
+                <span class="user-mgmt-search-count" id="umUserCount"></span>
             </div>
             <div class="user-mgmt-table-wrapper">
                 <table class="user-mgmt-table">
@@ -3068,23 +3065,26 @@ const App = (() => {
                 await DataManager.loadFromDynamo();
                 updateDynamoStatus('online');
             }
-            // Always re-snapshot after refresh (DynamoDB state or local state becomes the new baseline)
+            // Snapshot is taken inside loadFromDynamo, re-take for safety
             DynamoService.takeSnapshot(DataManager.getSchedulesRef());
+            // Re-render everything to reflect the new authoritative state
             renderAppList();
             renderVMListButton();
+            renderEBSListButton();
             renderHomeDashboard();
             if (currentView === 'machines' && currentApp && currentEnv) {
                 renderMachines(currentApp, currentEnv);
-            }
-            if (currentView === 'general-calendar') {
+            } else if (currentView === 'general-calendar') {
                 renderGCFilters();
                 renderGeneralCalendar();
-            }
-            if (currentView === 'vm-list') {
+            } else if (currentView === 'vm-list') {
                 renderVMList();
-            }
-            if (currentView === 'ebs-list') {
+            } else if (currentView === 'ebs-list') {
                 renderEBSList();
+            } else if (currentView === 'user-mgmt') {
+                renderUserManagement();
+            } else if (currentView === 'home') {
+                renderHomeDashboard();
             }
             updateChangesBadge();
             AuditLog.log('Aggiornamento stato', 'Dati ricaricati');
@@ -3302,6 +3302,13 @@ const App = (() => {
         });
         if (!confirmed) return;
 
+        // Re-compute changes AFTER dialog (user may have deleted entries inside the dialog)
+        const finalChanges = DynamoService.getModifiedAppEnvs(DataManager.getSchedulesRef());
+        if (finalChanges.length === 0) {
+            showToast('Nessuna modifica rimasta da salvare', 'info');
+            return;
+        }
+
         // Show loading state
         const saveBtn = $('#saveConfigBtn');
         isSaving = true;
@@ -3313,7 +3320,7 @@ const App = (() => {
             if (DynamoService.CONFIG.enabled) {
                 const user = DataManager.getCurrentUser();
                 // Enrich each hostname's entries with cronjob translation (per server)
-                const pushData = changes.map(c => {
+                const pushData = finalChanges.map(c => {
                     const enriched = {};
                     for (const [hostname, entries] of Object.entries(c.data)) {
                         enriched[hostname] = entries.map(e => ({
@@ -3326,17 +3333,22 @@ const App = (() => {
                 const results = await DynamoService.saveMultiple(pushData, user ? user.id : 'unknown');
                 const failed = results.filter(r => !r.success);
                 if (failed.length > 0) {
-                    showToast(`Errore nel salvataggio di ${failed.length}/${changes.length} ambienti. Riprova.`, 'error');
+                    showToast(`Errore nel salvataggio di ${failed.length}/${finalChanges.length} ambienti. Riprova.`, 'error');
                 } else {
-                    showToast(`Configurazione salvata${DynamoService.CONFIG.enabled ? ' su DynamoDB' : ''} \u2014 ${changes.length} ambienti`, 'success');
+                    showToast(`Configurazione salvata${DynamoService.CONFIG.enabled ? ' su DynamoDB' : ''} \u2014 ${finalChanges.length} ambienti`, 'success');
                 }
             } else {
                 showToast('Modifiche salvate in locale (DynamoDB non configurato)', 'success');
             }
 
-            AuditLog.log('Salvataggio configurazione', `${changes.length} ambienti aggiornati`);
+            AuditLog.log('Salvataggio configurazione', `${finalChanges.length} ambienti aggiornati`);
             DynamoService.takeSnapshot(DataManager.getSchedulesRef());
             updateChangesBadge();
+            // Refresh current view to reflect saved state
+            if (currentView === 'machines' && currentApp && currentEnv) {
+                renderMachines(currentApp, currentEnv);
+            }
+            renderHomeDashboard();
         } catch (err) {
             console.error('[Save] Error:', err);
             showToast('Errore nel salvataggio: ' + (err.message || 'Errore sconosciuto'), 'error');
