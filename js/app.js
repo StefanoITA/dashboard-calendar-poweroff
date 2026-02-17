@@ -383,7 +383,7 @@ const App = (() => {
                 return;
             }
 
-            // Match against users.json
+            // Match against platform users
             const ssoUser = DataManager.findUserByGitHub(ghUsername);
             if (ssoUser) {
                 ssoAuthenticated = true;
@@ -458,10 +458,10 @@ const App = (() => {
 
         let title, message, sub, actions;
         if (userId && SSO_CONFIG.enabled) {
-            // OAuth worked but user not in users.json
+            // OAuth worked but user not in platform users
             title = 'Accesso non autorizzato';
             message = `L'utenza GitHub Enterprise <strong>${userId}</strong> non \u00e8 associata a nessun profilo in questa applicazione.`;
-            sub = 'Richiedere a un amministratore di aggiungere il proprio <code>github_user</code> nel file <code>users.json</code>.';
+            sub = 'Richiedere a un amministratore di aggiungere il proprio profilo tramite il pannello di gestione utenti.';
             actions = `<button class="btn-primary" onclick="localStorage.removeItem('${SSO_STORAGE_KEY}');localStorage.removeItem('${SSO_TOKEN_KEY}');location.reload();">Riprova con altro account</button>`;
         } else {
             // Local mode — unknown user ID

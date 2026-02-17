@@ -70,6 +70,13 @@ def _log(level, message, **extra):
     print(json.dumps(entry, default=str))
 
 
+def _redact_token(token_str):
+    """Mostra solo primi 10 e ultimi 6 caratteri di un token per debug."""
+    if not token_str or len(token_str) < 20:
+        return f"[len={len(token_str) if token_str else 0}]"
+    return f"{token_str[:10]}...{token_str[-6:]} [len={len(token_str)}]"
+
+
 # ============================================
 # JSON helpers (DynamoDB Decimal → int/float)
 # ============================================
@@ -109,40 +116,140 @@ def _response(status, body):
 # ============================================
 def _verify_token(token_str):
     """Verifica token HMAC e ritorna payload se valido."""
+    _log("DEBUG", "Token verify — Inizio",
+         token_preview=_redact_token(token_str),
+         has_dot="." in token_str if token_str else False)
+
     if not token_str or "." not in token_str:
+        _log("WARN", "Token verify — FALLITO: token vuoto o senza punto",
+             token_empty=not token_str,
+             has_dot="." in token_str if token_str else False)
         return None
+
     parts = token_str.split(".", 1)
     if len(parts) != 2:
+        _log("WARN", "Token verify — FALLITO: split non ha prodotto 2 parti",
+             parts_count=len(parts))
         return None
+
     payload_b64, sig_received = parts
+    _log("DEBUG", "Token verify — Parti estratte",
+         payload_b64_len=len(payload_b64),
+         sig_received_len=len(sig_received),
+         sig_received_preview=sig_received[:10] + "..." if len(sig_received) > 10 else sig_received)
+
+    # Verifica SIGNING_SECRET configurato
+    if not SIGNING_SECRET:
+        _log("ERROR", "Token verify — FALLITO: SIGNING_SECRET non configurato!")
+        return None
+
+    _log("DEBUG", "Token verify — SIGNING_SECRET presente",
+         secret_len=len(SIGNING_SECRET),
+         secret_preview=SIGNING_SECRET[:3] + "..." if len(SIGNING_SECRET) > 3 else "***")
+
     sig_expected = hmac.new(
         SIGNING_SECRET.encode("utf-8"),
         payload_b64.encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
-    if not hmac.compare_digest(sig_expected, sig_received):
+
+    sig_match = hmac.compare_digest(sig_expected, sig_received)
+    _log("DEBUG", "Token verify — HMAC comparison",
+         sig_expected_preview=sig_expected[:10] + "...",
+         sig_received_preview=sig_received[:10] + "...",
+         sig_match=sig_match)
+
+    if not sig_match:
+        _log("WARN", "Token verify — FALLITO: firma HMAC non corrisponde",
+             sig_expected_len=len(sig_expected),
+             sig_received_len=len(sig_received))
         return None
+
+    # Decodifica payload
     padded = payload_b64 + "=" * (4 - len(payload_b64) % 4)
     try:
-        payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
-    except Exception:
+        payload_raw = base64.urlsafe_b64decode(padded).decode("utf-8")
+        payload = json.loads(payload_raw)
+        _log("DEBUG", "Token verify — Payload decodificato",
+             payload_keys=list(payload.keys()),
+             sub=payload.get("sub"),
+             typ=payload.get("typ"),
+             exp=payload.get("exp"),
+             iat=payload.get("iat"))
+    except Exception as e:
+        _log("WARN", "Token verify — FALLITO: errore decodifica payload",
+             error=str(e),
+             padded_len=len(padded))
         return None
+
     # Verifica scadenza
-    if payload.get("exp", 0) < time.time():
+    now = time.time()
+    exp = payload.get("exp", 0)
+    if exp < now:
+        _log("WARN", "Token verify — FALLITO: token scaduto",
+             exp=exp, now=now,
+             expired_ago_seconds=int(now - exp),
+             sub=payload.get("sub"))
         return None
+
+    _log("DEBUG", "Token verify — Scadenza OK",
+         exp=exp, now=now,
+         valid_for_seconds=int(exp - now),
+         valid_for_days=round((exp - now) / 86400, 1))
+
     # Accetta solo session token (typ=s), non transit (typ=t)
-    if payload.get("typ") != "s":
+    typ = payload.get("typ")
+    if typ != "s":
+        _log("WARN", "Token verify — FALLITO: tipo token non valido",
+             typ_received=typ, typ_expected="s",
+             sub=payload.get("sub"))
         return None
+
+    _log("INFO", "Token verify — SUCCESSO",
+         sub=payload.get("sub"),
+         typ=typ,
+         valid_for_days=round((exp - now) / 86400, 1))
     return payload
 
 
 def _extract_token(event):
     """Estrae il token dall'header Authorization: Bearer <token>."""
     headers = event.get("headers", {})
-    # Headers possono essere case-insensitive
+
+    # Debug: log tutte le chiavi degli headers ricevuti
+    header_keys = list(headers.keys()) if headers else []
+    _log("DEBUG", "Token extraction — headers ricevuti",
+         header_keys=header_keys,
+         headers_type=type(headers).__name__,
+         headers_count=len(header_keys))
+
+    # API Gateway HTTP API v2 lowercasa tutti gli headers
+    # API Gateway REST API v1 mantiene il case originale
     auth = headers.get("authorization") or headers.get("Authorization") or ""
+
+    _log("DEBUG", "Token extraction — Authorization header",
+         auth_found=bool(auth),
+         auth_length=len(auth),
+         auth_prefix=auth[:15] if auth else "(vuoto)",
+         tried_lowercase=bool(headers.get("authorization")),
+         tried_titlecase=bool(headers.get("Authorization")))
+
     if auth.startswith("Bearer "):
-        return auth[7:]
+        token = auth[7:]
+        _log("DEBUG", "Token extraction — Token estratto",
+             token_preview=_redact_token(token),
+             has_dot="." in token)
+        return token
+
+    # Fallback: cerca in tutti gli headers (case-insensitive)
+    for key, value in headers.items():
+        if key.lower() == "authorization" and value.startswith("Bearer "):
+            _log("DEBUG", "Token extraction — Trovato con key case-insensitive",
+                 original_key=key)
+            return value[7:]
+
+    _log("WARN", "Token extraction — Nessun token trovato",
+         all_headers={k: v[:20] + "..." if len(str(v)) > 20 else v for k, v in headers.items()})
     return None
 
 
@@ -151,16 +258,28 @@ def _extract_token(event):
 # ============================================
 def _get_user_by_github(github_user):
     """Cerca utente nella tabella DynamoDB per github_user (via GSI)."""
+    lookup_value = github_user.lower()
+    _log("DEBUG", "User lookup via GSI",
+         github_user_original=github_user,
+         github_user_lowercase=lookup_value,
+         table=USERS_TABLE,
+         gsi=USERS_GSI_NAME)
     try:
         resp = _users_table.query(
             IndexName=USERS_GSI_NAME,
-            KeyConditionExpression=Key("github_user").eq(github_user.lower()),
+            KeyConditionExpression=Key("github_user").eq(lookup_value),
         )
         items = resp.get("Items", [])
+        _log("DEBUG", "User lookup result",
+             items_found=len(items),
+             user_ids=[i.get("user_id") for i in items] if items else [],
+             scanned_count=resp.get("ScannedCount", 0))
         return items[0] if items else None
     except Exception as e:
         _log("ERROR", "Errore query utente per github_user",
-             github_user=github_user, error=str(e))
+             github_user=github_user, error=str(e),
+             error_type=type(e).__name__,
+             traceback=traceback.format_exc())
         return None
 
 
@@ -235,38 +354,92 @@ def lambda_handler(event, context):
     global _request_id
     _request_id = getattr(context, "aws_request_id", "-") if context else "-"
 
+    # ============================================
+    # DEBUG: Log completo della struttura event
+    # ============================================
+    _log("DEBUG", "=== EVENTO RICEVUTO ===",
+         event_keys=list(event.keys()),
+         has_rawPath="rawPath" in event,
+         has_path="path" in event,
+         has_httpMethod="httpMethod" in event,
+         has_requestContext="requestContext" in event,
+         has_headers="headers" in event,
+         has_body="body" in event,
+         isBase64Encoded=event.get("isBase64Encoded", False),
+         version=event.get("version", "N/A"))
+
+    # Log requestContext per capire il formato (v1 vs v2)
+    rc = event.get("requestContext", {})
+    if rc:
+        _log("DEBUG", "RequestContext structure",
+             rc_keys=list(rc.keys()),
+             has_http="http" in rc,
+             has_httpMethod="httpMethod" in rc,
+             has_resourcePath="resourcePath" in rc,
+             has_stage="stage" in rc,
+             stage=rc.get("stage"),
+             accountId=rc.get("accountId", "N/A"),
+             apiId=rc.get("apiId", "N/A"))
+        if "http" in rc:
+            _log("DEBUG", "RequestContext.http (v2 format)",
+                 http_method=rc["http"].get("method"),
+                 http_path=rc["http"].get("path"),
+                 http_sourceIp=rc["http"].get("sourceIp"))
+
     # Determina path e metodo
     raw_path = event.get("rawPath", "") or event.get("path", "")
-    method = (
-        event.get("httpMethod")
-        or event.get("requestContext", {}).get("http", {}).get("method", "")
-    ).upper()
+    method_v1 = event.get("httpMethod", "")
+    method_v2 = rc.get("http", {}).get("method", "")
+    method = (method_v1 or method_v2).upper()
 
-    _log("INFO", "API request", method=method, path=raw_path)
+    _log("INFO", "API request",
+         method=method, path=raw_path,
+         method_source="httpMethod(v1)" if method_v1 else "requestContext.http(v2)" if method_v2 else "UNKNOWN")
 
     # CORS preflight
     if method == "OPTIONS":
         return _response(200, {})
 
+    # Favicon shortcut
+    if "favicon" in raw_path.lower():
+        return {"statusCode": 204, "body": ""}
+
     # ============================================
     # Autenticazione: verifica token su OGNI richiesta
     # ============================================
+    _log("DEBUG", "=== INIZIO AUTENTICAZIONE ===")
+
     token_str = _extract_token(event)
     if not token_str:
+        _log("WARN", "AUTH FALLITA: Token mancante",
+             path=raw_path, method=method)
         return _response(401, {"error": "Token mancante. Invia header Authorization: Bearer <session_token>"})
 
     payload = _verify_token(token_str)
     if not payload:
+        _log("WARN", "AUTH FALLITA: Token non valido",
+             path=raw_path, method=method,
+             token_preview=_redact_token(token_str))
         return _response(401, {"error": "Token non valido o scaduto. Effettua nuovamente il login."})
 
     github_user = payload.get("sub")
     if not github_user:
+        _log("WARN", "AUTH FALLITA: Token senza sub",
+             path=raw_path, payload_keys=list(payload.keys()))
         return _response(401, {"error": "Token non contiene utente (sub)."})
+
+    _log("DEBUG", "=== LOOKUP UTENTE ===",
+         github_user=github_user,
+         users_table=USERS_TABLE,
+         gsi_name=USERS_GSI_NAME)
 
     # Cerca utente in DynamoDB
     user = _get_user_by_github(github_user)
     if not user:
-        _log("WARN", "Utente non trovato in DynamoDB", github_user=github_user)
+        _log("WARN", "Utente non trovato in DynamoDB",
+             github_user=github_user,
+             table=USERS_TABLE,
+             gsi=USERS_GSI_NAME)
         return _response(403, {"error": f"Utente '{github_user}' non autorizzato. Contattare un amministratore."})
 
     _log("INFO", "Utente autenticato",
@@ -506,12 +679,36 @@ def _handle_users_delete(event, raw_path, user):
 def _parse_body(event):
     """Parsa il body della richiesta (supporta base64)."""
     raw = event.get("body") or ""
-    if event.get("isBase64Encoded"):
+    is_b64 = event.get("isBase64Encoded", False)
+
+    _log("DEBUG", "Parse body",
+         body_len=len(raw),
+         isBase64Encoded=is_b64,
+         body_preview=raw[:100] + "..." if len(raw) > 100 else raw)
+
+    if is_b64:
         try:
             raw = base64.b64decode(raw).decode("utf-8")
-        except Exception:
+            _log("DEBUG", "Body decoded from base64", decoded_len=len(raw))
+        except Exception as e:
+            _log("WARN", "Body base64 decode failed", error=str(e))
             return {}
     try:
-        return json.loads(raw) if raw else {}
-    except (json.JSONDecodeError, TypeError):
+        parsed = json.loads(raw) if raw else {}
+        _log("DEBUG", "Body parsed", keys=list(parsed.keys()) if isinstance(parsed, dict) else "not_dict")
+        return parsed
+    except (json.JSONDecodeError, TypeError) as e:
+        _log("WARN", "Body JSON parse failed", error=str(e), raw_preview=raw[:200])
         return {}
+
+
+# ============================================
+# Log configurazione all'avvio (cold start)
+# ============================================
+_log("INFO", "=== LAMBDA COLD START ===",
+     signing_secret_configured=bool(SIGNING_SECRET),
+     signing_secret_len=len(SIGNING_SECRET) if SIGNING_SECRET else 0,
+     schedules_table=SCHEDULES_TABLE,
+     users_table=USERS_TABLE,
+     cors_origin=CORS_ORIGIN,
+     users_gsi_name=USERS_GSI_NAME)
