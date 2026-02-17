@@ -37,11 +37,13 @@ import traceback
 import decimal
 
 import boto3
+import botocore.exceptions
 from boto3.dynamodb.conditions import Key
 
 # ============================================
 # Configurazione
 # ============================================
+DEBUG = os.environ.get("DEBUG", "true").lower() in ("true", "1", "yes")
 SIGNING_SECRET = os.environ.get("SIGNING_SECRET", "")
 SCHEDULES_TABLE = os.environ.get("SCHEDULES_TABLE", "FinOpsShutdownScheduler")
 USERS_TABLE = os.environ.get("USERS_TABLE", "FinOps_Platform_Users")
@@ -57,9 +59,11 @@ _request_id = "-"
 
 
 # ============================================
-# Logging
+# Logging (DEBUG gated by DEBUG env var)
 # ============================================
 def _log(level, message, **extra):
+    if level == "DEBUG" and not DEBUG:
+        return
     entry = {
         "level": level,
         "message": message,
@@ -309,24 +313,36 @@ def _get_user_by_github(github_user):
         _log("DEBUG", "User lookup result",
              items_found=len(items),
              user_ids=[i.get("user_id") for i in items] if items else [],
-             scanned_count=resp.get("ScannedCount", 0))
+             scanned_count=resp.get("ScannedCount", 0),
+             http_status=resp.get("ResponseMetadata", {}).get("HTTPStatusCode"))
         return items[0] if items else None
     except Exception as e:
-        _log("ERROR", "Errore query utente per github_user",
-             github_user=github_user, error=str(e),
-             error_type=type(e).__name__,
+        _log("ERROR", "ERRORE DynamoDB: query utente per github_user",
+             github_user=github_user,
+             table=USERS_TABLE,
+             gsi=USERS_GSI_NAME,
+             **_dynamo_error_details(e),
              traceback=traceback.format_exc())
         return None
 
 
 def _get_user_by_id(user_id):
     """Cerca utente per user_id (PK diretto)."""
+    _log("DEBUG", "User get_item by PK",
+         user_id=user_id, table=USERS_TABLE)
     try:
         resp = _users_table.get_item(Key={"user_id": user_id})
+        found = "Item" in resp
+        _log("DEBUG", "User get_item result",
+             user_id=user_id, found=found,
+             http_status=resp.get("ResponseMetadata", {}).get("HTTPStatusCode"))
         return resp.get("Item")
     except Exception as e:
-        _log("ERROR", "Errore get utente per user_id",
-             user_id=user_id, error=str(e))
+        _log("ERROR", "ERRORE DynamoDB: get_item utente per user_id",
+             user_id=user_id,
+             table=USERS_TABLE,
+             **_dynamo_error_details(e),
+             traceback=traceback.format_exc())
         return None
 
 
@@ -464,10 +480,11 @@ def lambda_handler(event, context):
              path=raw_path, payload_keys=list(payload.keys()))
         return _response(401, {"error": "Token non contiene utente (sub)."})
 
-    _log("DEBUG", "=== LOOKUP UTENTE ===",
+    _log("DEBUG", "=== STEP: LOOKUP UTENTE IN DYNAMODB ===",
          github_user=github_user,
          users_table=USERS_TABLE,
-         gsi_name=USERS_GSI_NAME)
+         gsi_name=USERS_GSI_NAME,
+         hint="Se il prossimo log è un errore DynamoDB, il problema è IAM/VPC/tabella")
 
     # Cerca utente in DynamoDB
     user = _get_user_by_github(github_user)
@@ -475,7 +492,8 @@ def lambda_handler(event, context):
         _log("WARN", "Utente non trovato in DynamoDB",
              github_user=github_user,
              table=USERS_TABLE,
-             gsi=USERS_GSI_NAME)
+             gsi=USERS_GSI_NAME,
+             hint="L'utente github non ha un record nella tabella users, oppure la query GSI ha fallito (vedi log precedenti)")
         return _response(403, {"error": f"Utente '{github_user}' non autorizzato. Contattare un amministratore."})
 
     _log("INFO", "Utente autenticato",
@@ -484,6 +502,9 @@ def lambda_handler(event, context):
     # ============================================
     # Routing
     # ============================================
+    _log("DEBUG", "=== STEP: ROUTING ===",
+         method=method, path=raw_path,
+         user_id=user.get("user_id"), role=user.get("role"))
     try:
         if raw_path.endswith("/schedules/fetch"):
             return _handle_schedules_fetch(event, user)
@@ -527,14 +548,23 @@ def _handle_schedules_fetch(event, user):
             continue  # Salta silenziosamente le app non autorizzate
 
         try:
+            _log("DEBUG", "Schedules get_item",
+                 key=key, table=SCHEDULES_TABLE)
             resp = _schedules_table.get_item(Key={"app_env": key})
             item = resp.get("Item")
+            _log("DEBUG", "Schedules get_item result",
+                 key=key, found=item is not None,
+                 schedule_keys=len(item.get("schedules", {})) if item else 0,
+                 http_status=resp.get("ResponseMetadata", {}).get("HTTPStatusCode"))
             if item:
                 items[key] = item.get("schedules", {})
             else:
                 items[key] = {}
         except Exception as e:
-            _log("ERROR", "Errore DynamoDB get_item", key=key, error=str(e))
+            _log("ERROR", "ERRORE DynamoDB: get_item schedules",
+                 key=key, table=SCHEDULES_TABLE,
+                 **_dynamo_error_details(e),
+                 traceback=traceback.format_exc())
             items[key] = {}
 
     return _response(200, {"items": items})
@@ -572,6 +602,9 @@ def _handle_schedules_save(event, user):
 
     # Last-write-wins: PutItem sovrascrive completamente
     try:
+        _log("DEBUG", "Schedules put_item",
+             key=key, table=SCHEDULES_TABLE,
+             hostname_count=len(data) if isinstance(data, dict) else "not_dict")
         _schedules_table.put_item(Item={
             "app_env": key,
             "app": app,
@@ -580,8 +613,12 @@ def _handle_schedules_save(event, user):
             "last_modified_by": user_id,
             "last_modified_at": now,
         })
+        _log("DEBUG", "Schedules put_item OK", key=key)
     except Exception as e:
-        _log("ERROR", "Errore DynamoDB put_item", key=key, error=str(e))
+        _log("ERROR", "ERRORE DynamoDB: put_item schedules",
+             key=key, table=SCHEDULES_TABLE,
+             **_dynamo_error_details(e),
+             traceback=traceback.format_exc())
         return _response(500, {"error": f"Errore nel salvataggio: {e}"})
 
     return _response(200, {"success": True, "key": key, "modified_by": user_id, "modified_at": now})
@@ -605,14 +642,23 @@ def _handle_users_list(user):
         return _response(403, {"error": "Solo gli amministratori possono visualizzare la lista utenti"})
 
     try:
+        _log("DEBUG", "Users scan", table=USERS_TABLE)
         resp = _users_table.scan()
         users = resp.get("Items", [])
+        _log("DEBUG", "Users scan first page",
+             items=len(users),
+             has_more="LastEvaluatedKey" in resp,
+             http_status=resp.get("ResponseMetadata", {}).get("HTTPStatusCode"),
+             scanned_count=resp.get("ScannedCount", 0))
         # Gestisci paginazione per tabelle grandi
         while "LastEvaluatedKey" in resp:
             resp = _users_table.scan(ExclusiveStartKey=resp["LastEvaluatedKey"])
             users.extend(resp.get("Items", []))
     except Exception as e:
-        _log("ERROR", "Errore DynamoDB scan users", error=str(e))
+        _log("ERROR", "ERRORE DynamoDB: scan users",
+             table=USERS_TABLE,
+             **_dynamo_error_details(e),
+             traceback=traceback.format_exc())
         return _response(500, {"error": f"Errore nel recupero utenti: {e}"})
 
     _log("INFO", "Users list", count=len(users), requested_by=user.get("user_id"))
@@ -665,9 +711,16 @@ def _handle_users_upsert(event, user):
         item["created_at"] = now
 
     try:
+        _log("DEBUG", "Users put_item",
+             user_id=user_id, table=USERS_TABLE,
+             item_keys=list(item.keys()))
         _users_table.put_item(Item=item)
+        _log("DEBUG", "Users put_item OK", user_id=user_id)
     except Exception as e:
-        _log("ERROR", "Errore DynamoDB put_item user", user_id=user_id, error=str(e))
+        _log("ERROR", "ERRORE DynamoDB: put_item user",
+             user_id=user_id, table=USERS_TABLE,
+             **_dynamo_error_details(e),
+             traceback=traceback.format_exc())
         return _response(500, {"error": f"Errore nel salvataggio utente: {e}"})
 
     action = "aggiornato" if existing else "creato"
@@ -700,9 +753,15 @@ def _handle_users_delete(event, raw_path, user):
         return _response(404, {"error": f"Utente '{target_id}' non trovato"})
 
     try:
+        _log("DEBUG", "Users delete_item",
+             user_id=target_id, table=USERS_TABLE)
         _users_table.delete_item(Key={"user_id": target_id})
+        _log("DEBUG", "Users delete_item OK", user_id=target_id)
     except Exception as e:
-        _log("ERROR", "Errore DynamoDB delete_item user", user_id=target_id, error=str(e))
+        _log("ERROR", "ERRORE DynamoDB: delete_item user",
+             user_id=target_id, table=USERS_TABLE,
+             **_dynamo_error_details(e),
+             traceback=traceback.format_exc())
         return _response(500, {"error": f"Errore nell'eliminazione: {e}"})
 
     _log("INFO", "Utente eliminato", user_id=target_id, by=user.get("user_id"))
@@ -739,12 +798,79 @@ def _parse_body(event):
 
 
 # ============================================
+# Helper: DynamoDB error details (boto3 ClientError)
+# ============================================
+def _dynamo_error_details(e):
+    """Estrai dettagli utili da botocore.exceptions.ClientError."""
+    details = {
+        "error_type": type(e).__name__,
+        "error_str": str(e),
+    }
+    if isinstance(e, botocore.exceptions.ClientError):
+        err = e.response.get("Error", {})
+        details["dynamo_error_code"] = err.get("Code", "?")
+        details["dynamo_error_message"] = err.get("Message", "?")
+        details["http_status"] = e.response.get("ResponseMetadata", {}).get("HTTPStatusCode", "?")
+        details["request_id_aws"] = e.response.get("ResponseMetadata", {}).get("RequestId", "?")
+    elif isinstance(e, botocore.exceptions.NoCredentialsError):
+        details["hint"] = "Nessuna credenziale AWS trovata. Verificare IAM role della Lambda."
+    elif isinstance(e, botocore.exceptions.EndpointConnectionError):
+        details["hint"] = "Impossibile raggiungere endpoint DynamoDB. Lambda in VPC senza NAT Gateway?"
+    elif isinstance(e, botocore.exceptions.ConnectTimeoutError):
+        details["hint"] = "Timeout connessione a DynamoDB. Lambda in VPC senza endpoint/NAT?"
+    return details
+
+
+# ============================================
+# DynamoDB connectivity check (cold start)
+# ============================================
+def _check_dynamodb_connectivity():
+    """Verifica accesso alle tabelle DynamoDB al cold start."""
+    results = {}
+    for label, table_obj, table_name in [
+        ("schedules", _schedules_table, SCHEDULES_TABLE),
+        ("users", _users_table, USERS_TABLE),
+    ]:
+        try:
+            status = table_obj.table_status
+            key_schema = table_obj.key_schema
+            gsi_list = [g["IndexName"] for g in (table_obj.global_secondary_indexes or [])]
+            results[label] = {
+                "status": status,
+                "key_schema": key_schema,
+                "gsi": gsi_list,
+                "ok": True,
+            }
+        except Exception as e:
+            results[label] = {
+                "ok": False,
+                **_dynamo_error_details(e),
+                "table_name": table_name,
+            }
+    return results
+
+
+# ============================================
 # Log configurazione all'avvio (cold start)
 # ============================================
 _log("INFO", "=== LAMBDA COLD START ===",
+     debug_mode=DEBUG,
      signing_secret_configured=bool(SIGNING_SECRET),
      signing_secret_len=len(SIGNING_SECRET) if SIGNING_SECRET else 0,
      schedules_table=SCHEDULES_TABLE,
      users_table=USERS_TABLE,
      cors_origin=CORS_ORIGIN,
-     users_gsi_name=USERS_GSI_NAME)
+     users_gsi_name=USERS_GSI_NAME,
+     boto3_version=boto3.__version__,
+     region=boto3.Session().region_name)
+
+# Diagnostica DynamoDB al cold start (solo se DEBUG)
+if DEBUG:
+    _dynamo_check = _check_dynamodb_connectivity()
+    _log("INFO", "=== DYNAMODB CONNECTIVITY CHECK ===", **_dynamo_check)
+    if not _dynamo_check.get("schedules", {}).get("ok"):
+        _log("ERROR", "SCHEDULES TABLE NON RAGGIUNGIBILE!",
+             table=SCHEDULES_TABLE, details=_dynamo_check.get("schedules"))
+    if not _dynamo_check.get("users", {}).get("ok"):
+        _log("ERROR", "USERS TABLE NON RAGGIUNGIBILE!",
+             table=USERS_TABLE, details=_dynamo_check.get("users"))
