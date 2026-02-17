@@ -449,6 +449,8 @@ const App = (() => {
         renderAppList();
         renderVMListButton();
         renderEBSListButton();
+        renderCalculatorButton();
+        renderUserMgmtButton();
         renderHomeDashboard();
         initTimePickers();
         bindEvents();
@@ -712,6 +714,10 @@ const App = (() => {
         if (vmView) vmView.style.display = view === 'vm-list' ? 'block' : 'none';
         const ebsView = document.getElementById('ebsListView');
         if (ebsView) ebsView.style.display = view === 'ebs-list' ? 'block' : 'none';
+        const userMgmtView = document.getElementById('userMgmtView');
+        if (userMgmtView) userMgmtView.style.display = view === 'user-mgmt' ? 'block' : 'none';
+        const calcView = document.getElementById('calculatorView');
+        if (calcView) calcView.style.display = view === 'calculator' ? 'block' : 'none';
         $('#exportBtn').style.display = (view === 'machines' || view === 'general-calendar') ? 'inline-flex' : 'none';
         // Update sidebar active states
         $('#homeBtn').classList.toggle('active', view === 'home');
@@ -720,6 +726,10 @@ const App = (() => {
         if (vmBtn) vmBtn.classList.toggle('active', view === 'vm-list');
         const ebsBtn = document.getElementById('ebsListBtn');
         if (ebsBtn) ebsBtn.classList.toggle('active', view === 'ebs-list');
+        const userMgmtBtn = document.getElementById('userMgmtBtn');
+        if (userMgmtBtn) userMgmtBtn.classList.toggle('active', view === 'user-mgmt');
+        const calcBtn = document.getElementById('calculatorBtn');
+        if (calcBtn) calcBtn.classList.toggle('active', view === 'calculator');
     }
 
     function updateCalendarVisibility() {
@@ -808,13 +818,40 @@ const App = (() => {
     function renderEBSListButton() {
         const old = document.getElementById('ebsListBtn');
         if (old) old.remove();
-        if (!DataManager.canViewVMList()) return;
+        if (!DataManager.canViewEBSList()) return;
         const navActions = document.querySelector('.sidebar-nav-actions');
         const btn = document.createElement('button');
         btn.className = 'sidebar-action-btn';
         btn.id = 'ebsListBtn';
         btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg> Elenco Dischi AWS`;
         btn.addEventListener('click', showEBSList);
+        navActions.appendChild(btn);
+    }
+
+    function renderCalculatorButton() {
+        const old = document.getElementById('calculatorBtn');
+        if (old) old.remove();
+        if (!DataManager.canViewCalculator()) return;
+        const navActions = document.querySelector('.sidebar-nav-actions');
+        const btn = document.createElement('button');
+        btn.className = 'sidebar-action-btn';
+        btn.id = 'calculatorBtn';
+        btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="10" y2="10"/><line x1="12" y1="10" x2="14" y2="10"/><line x1="16" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="10" y2="14"/><line x1="12" y1="14" x2="14" y2="14"/><line x1="16" y1="14" x2="16" y2="14"/><line x1="8" y1="18" x2="10" y2="18"/><line x1="12" y1="18" x2="16" y2="18"/></svg> Calcolatore`;
+        btn.addEventListener('click', showCalculator);
+        navActions.appendChild(btn);
+    }
+
+    function renderUserMgmtButton() {
+        const old = document.getElementById('userMgmtBtn');
+        if (old) old.remove();
+        const current = DataManager.getCurrentUser();
+        if (!current || current.role !== 'Admin') return;
+        const navActions = document.querySelector('.sidebar-nav-actions');
+        const btn = document.createElement('button');
+        btn.className = 'sidebar-action-btn';
+        btn.id = 'userMgmtBtn';
+        btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> Gestisci Utenti`;
+        btn.addEventListener('click', showUserManagement);
         navActions.appendChild(btn);
     }
 
@@ -1200,11 +1237,7 @@ const App = (() => {
                         </div>
                     </div>
                 </div>
-                <div class="machine-card-body">
-                    <div class="machine-detail">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
-                        ${m.server_type}
-                    </div>
+                <div class="machine-card-body" data-server-type="${m.server_type}">
                     ${desc ? `<div class="machine-description">${desc}</div>` : ''}
                     <div class="entries-list">${renderEntriesList(entries, m.hostname, readOnly)}</div>
                     ${renderNotesSection(m.hostname, notesArr, readOnly)}
@@ -2531,6 +2564,419 @@ const App = (() => {
         renderFilterChips();
         renderRows();
         ebsView.querySelector('#ebsFilterSearch').addEventListener('input', debounce(renderRows, 300));
+    }
+
+    // ============================================
+    // Calculator View
+    // ============================================
+    function showCalculator() {
+        currentApp = null;
+        currentEnv = null;
+        $$('#appList .nav-item').forEach(i => i.classList.remove('active'));
+        $$('.sidebar-action-btn').forEach(b => b.classList.remove('active'));
+        const calcBtn = document.getElementById('calculatorBtn');
+        if (calcBtn) calcBtn.classList.add('active');
+        closeEnvPopover();
+        updateBreadcrumb(null);
+        $('#breadcrumb').innerHTML = '<span class="breadcrumb-item active">Calcolatore</span>';
+        renderCalculator();
+        showView('calculator');
+    }
+
+    function renderCalculator() {
+        const calcView = document.getElementById('calculatorView');
+        if (!calcView) return;
+        calcView.innerHTML = `
+            <div class="calculator-empty">
+                <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="10" y2="10"/><line x1="12" y1="10" x2="14" y2="10"/><line x1="16" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="10" y2="14"/><line x1="12" y1="14" x2="14" y2="14"/><line x1="16" y1="14" x2="16" y2="14"/><line x1="8" y1="18" x2="10" y2="18"/><line x1="12" y1="18" x2="16" y2="18"/></svg>
+                <h3>Calcolatore FinOps</h3>
+                <p>Questa sezione ospiter\u00e0 i calcolatori per le fee aziendali interne e altri strumenti di analisi costi.</p>
+            </div>`;
+    }
+
+    // ============================================
+    // User Management (Admin only)
+    // ============================================
+    function showUserManagement() {
+        const current = DataManager.getCurrentUser();
+        if (!current || current.role !== 'Admin') {
+            showToast('Accesso riservato agli amministratori', 'error');
+            return;
+        }
+        currentApp = null;
+        currentEnv = null;
+        $$('#appList .nav-item').forEach(i => i.classList.remove('active'));
+        $$('.sidebar-action-btn').forEach(b => b.classList.remove('active'));
+        const mgmtBtn = document.getElementById('userMgmtBtn');
+        if (mgmtBtn) mgmtBtn.classList.add('active');
+        closeEnvPopover();
+        updateBreadcrumb(null);
+        $('#breadcrumb').innerHTML = '<span class="breadcrumb-item active">Gestisci Utenti</span>';
+        renderUserManagement();
+        showView('user-mgmt');
+    }
+
+    async function renderUserManagement() {
+        const mgmtView = document.getElementById('userMgmtView');
+        if (!mgmtView) return;
+
+        mgmtView.innerHTML = `
+            <div class="user-mgmt-header">
+                <div>
+                    <h2>Gestione Utenti</h2>
+                    <div class="user-mgmt-subtitle">Gestisci utenti, ruoli e permessi applicativi</div>
+                </div>
+                <div class="user-mgmt-actions">
+                    <button class="btn-secondary" id="umRefreshBtn">
+                        ${SVG.refresh} Aggiorna
+                    </button>
+                    <button class="btn-primary" id="umAddUserBtn">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        Nuovo Utente
+                    </button>
+                </div>
+            </div>
+            <div class="user-mgmt-table-wrapper">
+                <table class="user-mgmt-table">
+                    <thead>
+                        <tr>
+                            <th>Utente</th>
+                            <th>GitHub</th>
+                            <th>Ruolo</th>
+                            <th>Permessi Applicazioni</th>
+                            <th>Permessi Speciali</th>
+                            <th>Ultimo Accesso</th>
+                            <th style="width:80px;">Azioni</th>
+                        </tr>
+                    </thead>
+                    <tbody id="umTableBody">
+                        <tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-tertiary);">Caricamento...</td></tr>
+                    </tbody>
+                </table>
+            </div>`;
+
+        // Load users from DynamoDB if possible, otherwise from local
+        let usersList = [];
+        if (DynamoService.CONFIG.enabled) {
+            try {
+                usersList = await DynamoService.fetchUsers();
+                if (!usersList) usersList = DataManager.getUsers();
+            } catch {
+                usersList = DataManager.getUsers();
+            }
+        } else {
+            usersList = DataManager.getUsers();
+        }
+
+        const renderTable = () => {
+            const tbody = mgmtView.querySelector('#umTableBody');
+            if (!usersList || usersList.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-tertiary);">Nessun utente trovato</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = usersList.map(u => {
+                const userId = u.user_id || u.id;
+                const roleClass = u.role === 'Admin' ? 'admin' : u.role === 'Application_owner' ? 'owner' : 'readonly';
+                const roleLabel = u.role === 'Admin' ? 'Admin' : u.role === 'Application_owner' ? 'App Owner' : 'Read-Only';
+
+                // Build app tags
+                let appTags = '';
+                const apps = u.applications;
+                if (Array.isArray(apps) && apps.includes('*')) {
+                    appTags = '<span class="user-app-tag rw">Tutte le applicazioni</span>';
+                } else if (typeof apps === 'object' && !Array.isArray(apps)) {
+                    const appEntries = Object.entries(apps).filter(([k]) => !['lista_server', 'lista_ebs', 'calcolatore'].includes(k));
+                    appTags = appEntries.slice(0, 5).map(([app, perm]) =>
+                        `<span class="user-app-tag ${perm}">${app} <small>${perm.toUpperCase()}</small></span>`
+                    ).join('');
+                    if (appEntries.length > 5) appTags += `<span class="user-app-tag">+${appEntries.length - 5}</span>`;
+                    if (appEntries.length === 0) appTags = '<span style="color:var(--text-tertiary);font-size:0.75rem;">\u2014</span>';
+                } else if (Array.isArray(apps)) {
+                    appTags = apps.map(a => `<span class="user-app-tag rw">${a}</span>`).join('');
+                } else {
+                    appTags = '<span style="color:var(--text-tertiary);font-size:0.75rem;">\u2014</span>';
+                }
+
+                // Special permissions
+                const specials = [];
+                if (typeof apps === 'object' && !Array.isArray(apps)) {
+                    if (apps['lista_server']) specials.push('<span class="user-app-tag special">Elenco VM</span>');
+                    if (apps['lista_ebs']) specials.push('<span class="user-app-tag special">Elenco EBS</span>');
+                    if (apps['calcolatore']) specials.push('<span class="user-app-tag special">Calcolatore</span>');
+                }
+                if (u.role === 'Admin' || (Array.isArray(apps) && apps.includes('*'))) {
+                    specials.length = 0;
+                    specials.push('<span class="user-app-tag special">Tutti</span>');
+                }
+                const specialsHtml = specials.length > 0 ? specials.join('') : '<span style="color:var(--text-tertiary);font-size:0.75rem;">\u2014</span>';
+
+                const lastAccess = u.last_login || u.updated_at || '\u2014';
+                const lastAccessStr = lastAccess !== '\u2014' ? new Date(lastAccess).toLocaleString('it-IT', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '\u2014';
+
+                return `<tr data-user-id="${userId}">
+                    <td class="user-name-cell">${u.name || userId}<small>${userId}</small></td>
+                    <td><code style="font-size:0.8rem;">${u.github_user || '\u2014'}</code></td>
+                    <td><span class="user-role-badge ${roleClass}">${roleLabel}</span></td>
+                    <td><div class="user-apps-list">${appTags}</div></td>
+                    <td><div class="user-apps-list">${specialsHtml}</div></td>
+                    <td class="user-last-access">${lastAccessStr}</td>
+                    <td>
+                        <div class="user-actions-cell">
+                            <button class="user-action-btn um-edit-btn" data-user-id="${userId}" title="Modifica">
+                                ${SVG.edit}
+                            </button>
+                            <button class="user-action-btn danger um-delete-btn" data-user-id="${userId}" title="Elimina">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                            </button>
+                        </div>
+                    </td>
+                </tr>`;
+            }).join('');
+
+            // Bind edit buttons
+            tbody.querySelectorAll('.um-edit-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const uid = btn.dataset.userId;
+                    const u = usersList.find(x => (x.user_id || x.id) === uid);
+                    if (u) openUserEditPanel(u, false, () => renderUserManagement());
+                });
+            });
+
+            // Bind delete buttons
+            tbody.querySelectorAll('.um-delete-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const uid = btn.dataset.userId;
+                    const current = DataManager.getCurrentUser();
+                    if (uid === (current.user_id || current.id)) {
+                        showToast('Non puoi eliminare il tuo stesso account', 'error');
+                        return;
+                    }
+                    if (!confirm(`Sei sicuro di voler eliminare l'utente "${uid}"?`)) return;
+                    try {
+                        if (DynamoService.CONFIG.enabled) {
+                            await DynamoService.deleteUser(uid);
+                        }
+                        showToast(`Utente "${uid}" eliminato`, 'success');
+                        renderUserManagement();
+                    } catch (e) {
+                        showToast('Errore eliminazione: ' + e.message, 'error');
+                    }
+                });
+            });
+        };
+
+        renderTable();
+
+        // Add user button
+        mgmtView.querySelector('#umAddUserBtn').addEventListener('click', () => {
+            openUserEditPanel(null, true, () => renderUserManagement());
+        });
+
+        // Refresh button
+        mgmtView.querySelector('#umRefreshBtn').addEventListener('click', () => renderUserManagement());
+    }
+
+    function openUserEditPanel(existingUser, isNew, onSaved) {
+        const allApps = DataManager.getApplications(true).map(a => a.name);
+
+        // Build current permissions map from user
+        const currentPerms = {};
+        if (existingUser) {
+            const apps = existingUser.applications;
+            if (typeof apps === 'object' && !Array.isArray(apps)) {
+                Object.entries(apps).forEach(([k, v]) => { currentPerms[k] = v; });
+            } else if (Array.isArray(apps) && apps.includes('*')) {
+                // Admin with all — mark all as rw
+                allApps.forEach(a => { currentPerms[a] = 'rw'; });
+            }
+        }
+
+        const overlay = document.createElement('div');
+        overlay.className = 'user-edit-overlay';
+        overlay.innerHTML = `
+            <div class="user-edit-panel">
+                <div class="user-edit-header">
+                    <h3>${isNew ? 'Nuovo Utente' : 'Modifica Utente'}</h3>
+                    <button class="btn-icon modal-close" id="ueCloseBtn">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                </div>
+                <div class="user-edit-body">
+                    <div class="user-edit-row">
+                        <div class="user-edit-field">
+                            <label>User ID</label>
+                            <input type="text" id="ueUserId" value="${existingUser ? (existingUser.user_id || existingUser.id || '') : ''}" ${!isNew ? 'readonly style="opacity:0.6;cursor:not-allowed;"' : ''} placeholder="es. nome.cognome">
+                        </div>
+                        <div class="user-edit-field">
+                            <label>Nome completo</label>
+                            <input type="text" id="ueName" value="${existingUser ? (existingUser.name || '') : ''}" placeholder="es. Mario Rossi">
+                        </div>
+                    </div>
+                    <div class="user-edit-row">
+                        <div class="user-edit-field">
+                            <label>GitHub Username</label>
+                            <input type="text" id="ueGithub" value="${existingUser ? (existingUser.github_user || '') : ''}" placeholder="es. mario-rossi">
+                        </div>
+                        <div class="user-edit-field">
+                            <label>Ruolo</label>
+                            <select id="ueRole">
+                                <option value="Admin" ${existingUser && existingUser.role === 'Admin' ? 'selected' : ''}>Admin</option>
+                                <option value="Application_owner" ${existingUser && existingUser.role === 'Application_owner' ? 'selected' : ''}>Application Owner</option>
+                                <option value="Read-Only" ${existingUser && existingUser.role === 'Read-Only' ? 'selected' : ''}>Read-Only</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="user-edit-field">
+                        <label>Permessi Speciali</label>
+                        <div class="user-special-perms">
+                            <label class="user-special-perm-item">
+                                <input type="checkbox" id="uePermVMList" ${currentPerms['lista_server'] ? 'checked' : ''}>
+                                Elenco VM
+                            </label>
+                            <label class="user-special-perm-item">
+                                <input type="checkbox" id="uePermEBSList" ${currentPerms['lista_ebs'] ? 'checked' : ''}>
+                                Elenco Dischi EBS
+                            </label>
+                            <label class="user-special-perm-item">
+                                <input type="checkbox" id="uePermCalc" ${currentPerms['calcolatore'] ? 'checked' : ''}>
+                                Calcolatore
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="user-perm-section" id="ueAppPermsSection">
+                        <div class="user-perm-section-header">
+                            <span>Permessi Applicazioni</span>
+                            <input type="text" class="user-perm-search" id="ueAppSearch" placeholder="Cerca applicazione...">
+                        </div>
+                        <div class="user-perm-list" id="ueAppPermList"></div>
+                    </div>
+                </div>
+                <div class="user-edit-footer">
+                    <button class="btn-secondary" id="ueCancelBtn">Annulla</button>
+                    <button class="btn-primary" id="ueSaveBtn">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                        Salva
+                    </button>
+                </div>
+            </div>`;
+
+        document.body.appendChild(overlay);
+
+        // Local perms state
+        const perms = { ...currentPerms };
+
+        const renderAppPerms = (filter = '') => {
+            const list = overlay.querySelector('#ueAppPermList');
+            const q = filter.toLowerCase();
+            list.innerHTML = allApps
+                .filter(a => !q || a.toLowerCase().includes(q))
+                .map(appName => {
+                    const p = perms[appName] || 'none';
+                    return `<div class="user-perm-item" data-app="${appName}">
+                        <span class="user-perm-item-name">${appName}</span>
+                        <div class="user-perm-toggle-group">
+                            <button class="user-perm-toggle ${p === 'rw' ? 'active-rw' : ''}" data-perm="rw">RW</button>
+                            <button class="user-perm-toggle ${p === 'ro' ? 'active-ro' : ''}" data-perm="ro">RO</button>
+                            <button class="user-perm-toggle ${p === 'none' ? 'active-none' : ''}" data-perm="none">\u2014</button>
+                        </div>
+                    </div>`;
+                }).join('');
+
+            // Bind toggles
+            list.querySelectorAll('.user-perm-toggle').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const item = btn.closest('.user-perm-item');
+                    const app = item.dataset.app;
+                    const perm = btn.dataset.perm;
+                    if (perm === 'none') {
+                        delete perms[app];
+                    } else {
+                        perms[app] = perm;
+                    }
+                    // Update UI
+                    item.querySelectorAll('.user-perm-toggle').forEach(b => {
+                        b.classList.remove('active-rw', 'active-ro', 'active-none');
+                    });
+                    btn.classList.add(perm === 'rw' ? 'active-rw' : perm === 'ro' ? 'active-ro' : 'active-none');
+                });
+            });
+        };
+
+        renderAppPerms();
+
+        // Role change: if Admin, hide app perms
+        const roleSelect = overlay.querySelector('#ueRole');
+        const appPermsSection = overlay.querySelector('#ueAppPermsSection');
+        const updateRoleUI = () => {
+            const role = roleSelect.value;
+            appPermsSection.style.display = role === 'Admin' ? 'none' : '';
+        };
+        updateRoleUI();
+        roleSelect.addEventListener('change', updateRoleUI);
+
+        // Search filter
+        overlay.querySelector('#ueAppSearch').addEventListener('input', (e) => {
+            renderAppPerms(e.target.value);
+        });
+
+        // Close
+        const close = () => overlay.remove();
+        overlay.querySelector('#ueCloseBtn').addEventListener('click', close);
+        overlay.querySelector('#ueCancelBtn').addEventListener('click', close);
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+        // Save
+        overlay.querySelector('#ueSaveBtn').addEventListener('click', async () => {
+            const userId = overlay.querySelector('#ueUserId').value.trim();
+            const name = overlay.querySelector('#ueName').value.trim();
+            const github = overlay.querySelector('#ueGithub').value.trim();
+            const role = overlay.querySelector('#ueRole').value;
+
+            if (!userId || !name || !github) {
+                showToast('Compila tutti i campi obbligatori (User ID, Nome, GitHub)', 'error');
+                return;
+            }
+
+            // Build applications object
+            let applications;
+            if (role === 'Admin') {
+                applications = ['*'];
+            } else {
+                applications = {};
+                // App perms
+                Object.entries(perms).forEach(([k, v]) => {
+                    if (!['lista_server', 'lista_ebs', 'calcolatore'].includes(k) && v) {
+                        applications[k] = v;
+                    }
+                });
+                // Special perms
+                if (overlay.querySelector('#uePermVMList').checked) applications['lista_server'] = 'ro';
+                if (overlay.querySelector('#uePermEBSList').checked) applications['lista_ebs'] = 'ro';
+                if (overlay.querySelector('#uePermCalc').checked) applications['calcolatore'] = 'ro';
+            }
+
+            const userData = {
+                user_id: userId,
+                name: name,
+                github_user: github,
+                role: role,
+                applications: applications
+            };
+
+            try {
+                if (DynamoService.CONFIG.enabled) {
+                    await DynamoService.upsertUser(userData);
+                }
+                showToast(`Utente "${name}" ${isNew ? 'creato' : 'aggiornato'} con successo`, 'success');
+                close();
+                if (onSaved) onSaved();
+            } catch (e) {
+                showToast('Errore salvataggio: ' + e.message, 'error');
+            }
+        });
     }
 
     // ============================================

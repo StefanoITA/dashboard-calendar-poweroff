@@ -179,6 +179,24 @@ const DataManager = (() => {
         return false;
     }
 
+    function canViewEBSList() {
+        if (!currentUser) return false;
+        if (currentUser.role === 'Admin') return true;
+        if (isGlobalReadOnly()) return true;
+        const apps = currentUser.applications;
+        if (typeof apps === 'object' && !Array.isArray(apps) && apps['lista_ebs']) return true;
+        return false;
+    }
+
+    function canViewCalculator() {
+        if (!currentUser) return false;
+        if (currentUser.role === 'Admin') return true;
+        if (isGlobalReadOnly()) return true;
+        const apps = currentUser.applications;
+        if (typeof apps === 'object' && !Array.isArray(apps) && apps['calcolatore']) return true;
+        return false;
+    }
+
     function getVMListMachines() {
         if (!currentUser) return [];
         if (currentUser.role === 'Admin' || isGlobalReadOnly()) return [...machines];
@@ -728,7 +746,8 @@ const DataManager = (() => {
         getNotes, addNote, updateNote, deleteNote, getAllNotesCount,
         getEnvGroups, updateEnvGroup, removeEnvGroup, excludeFromEnvGroup,
         reincludeInEnvGroup, reincludeSpecificInEnvGroup,
-        isGlobalReadOnly, canViewVMList, getVMListMachines, generateCronjobs,
+        isGlobalReadOnly, canViewVMList, canViewEBSList, canViewCalculator,
+        getVMListMachines, generateCronjobs,
         loadEBSVolumes, getEBSVolumes,
         get machines() { return machines; }
     };
