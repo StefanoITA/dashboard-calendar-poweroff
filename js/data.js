@@ -57,22 +57,38 @@ const DataManager = (() => {
     // ============================================
     function cacheBust(url) { return url + (url.includes('?') ? '&' : '?') + '_=' + Date.now(); }
 
-    // Users source: 'json' (local file) or future 'dynamodb' (API endpoint)
+    // Users source: 'json' (local file) or 'dynamodb' (via API Lambda)
     const USERS_CONFIG = {
-        source: 'json', // Change to 'dynamodb' when migrating
-        endpoint: '' // Set to API Gateway URL for DynamoDB users
+        source: 'json', // Cambiare a 'dynamodb' quando le tabelle sono pronte
+        endpoint: '' // Non più usato: gli utenti vengono caricati via DynamoService
     };
 
     async function loadUsers() {
         try {
             let data;
-            if (USERS_CONFIG.source === 'dynamodb' && USERS_CONFIG.endpoint) {
-                const response = await fetch(cacheBust(USERS_CONFIG.endpoint));
-                data = await response.json();
-            } else {
-                const response = await fetch(cacheBust('data/users.json'));
-                data = await response.json();
+            if (USERS_CONFIG.source === 'dynamodb' && DynamoService.CONFIG.enabled) {
+                // Prova a caricare da DynamoDB via Lambda autenticata
+                const dynamoUsers = await DynamoService.fetchUsers();
+                if (dynamoUsers) {
+                    // DynamoDB users hanno user_id, frontend usa id
+                    users = dynamoUsers.map(u => ({
+                        ...u,
+                        id: u.user_id || u.id
+                    }));
+                    return users;
+                }
+                // Se fetchUsers ritorna null (non admin), carica solo il proprio profilo
+                const me = await DynamoService.fetchCurrentUser();
+                if (me) {
+                    users = [{ ...me, id: me.user_id || me.id }];
+                    return users;
+                }
+                // Fallback a JSON se DynamoDB non disponibile
+                console.warn('[Users] DynamoDB non disponibile, fallback a JSON');
             }
+            // Source JSON (default) o fallback
+            const response = await fetch(cacheBust('data/users.json'));
+            data = await response.json();
             users = data.users || [];
         } catch (e) {
             console.warn('Could not load users, using defaults', e);

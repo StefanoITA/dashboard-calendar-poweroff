@@ -1,17 +1,27 @@
 /* ============================================
-   DynamoDB Service — State Persistence Layer
+   DynamoDB Service — State Persistence Layer (Secure)
    ============================================
-   Configure CONFIG.enabled = true and set your
-   API Gateway endpoint to activate DynamoDB sync.
+   Tutte le richieste passano per la Lambda finops-api
+   che verifica il token e i permessi prima di accedere a DynamoDB.
 
-   Expected API:
+   Flusso:
+   Frontend → API Gateway → Lambda (verifica token + permessi) → DynamoDB
+
+   Expected API (autenticato):
    POST {endpoint}/schedules/fetch
+     Headers: Authorization: Bearer <session_token>
      Body: { "keys": ["App_Env", ...] }
      Response: { "items": { "App_Env": { "hostname": [...entries], ... }, ... } }
 
    POST {endpoint}/schedules/save
-     Body: { "key": "App_Env", "data": {...}, "user": "id", "timestamp": "ISO" }
+     Headers: Authorization: Bearer <session_token>
+     Body: { "key": "App_Env", "data": {...} }
      Response: { "success": true }
+
+   GET  {endpoint}/users/me     → Profilo utente corrente
+   GET  {endpoint}/users        → Lista utenti (solo Admin)
+   POST {endpoint}/users        → Crea/aggiorna utente (solo Admin)
+   DELETE {endpoint}/users/{id} → Elimina utente (solo Admin)
    ============================================ */
 const DynamoService = (() => {
     const CONFIG = {
@@ -23,7 +33,25 @@ const DynamoService = (() => {
 
     let initialSnapshot = {};
 
-    function appEnvKey(app, env) { return `${app}_${env}`; }
+    // ============================================
+    // Key sanitization: spazi → _, separatore → #
+    // "Applicazione Prova" + "Development" → "Applicazione_Prova#Development"
+    // ============================================
+    function appEnvKey(app, env) {
+        const safeApp = app.trim().replace(/ /g, '_');
+        const safeEnv = env.trim().replace(/ /g, '_');
+        return `${safeApp}#${safeEnv}`;
+    }
+
+    // ============================================
+    // Auth header: token dalla sessione corrente
+    // ============================================
+    function _getAuthHeaders() {
+        const token = localStorage.getItem('shutdownScheduler_gheToken');
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        return headers;
+    }
 
     // ============================================
     // Retry Helper — exponential backoff
@@ -73,35 +101,42 @@ const DynamoService = (() => {
         }
     }
 
-    // Fetch schedules for multiple app_env keys (with retry)
+    // ============================================
+    // API: Schedules
+    // ============================================
+
+    // Fetch schedules for multiple app_env keys (authenticated + retry)
     async function fetchAll(keys) {
         if (!CONFIG.enabled) return null;
         return withRetry(async () => {
             const response = await fetch(`${CONFIG.endpoint}/schedules/fetch`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: _getAuthHeaders(),
                 body: JSON.stringify({ keys })
             });
+            if (response.status === 401 || response.status === 403) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.error || `Accesso negato (${response.status})`);
+            }
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data = await response.json();
             return data.items || {};
         }, 'fetchAll');
     }
 
-    // Save schedules for one app_env (with retry)
+    // Save schedules for one app_env (authenticated + retry)
     async function saveOne(key, data, userId) {
         if (!CONFIG.enabled) return true;
         return withRetry(async () => {
             const response = await fetch(`${CONFIG.endpoint}/schedules/save`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    key,
-                    data,
-                    user: userId,
-                    timestamp: new Date().toISOString()
-                })
+                headers: _getAuthHeaders(),
+                body: JSON.stringify({ key, data })
             });
+            if (response.status === 401 || response.status === 403) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.error || `Permesso negato (${response.status})`);
+            }
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             return true;
         }, `saveOne(${key})`);
@@ -121,10 +156,72 @@ const DynamoService = (() => {
         return results;
     }
 
+    // ============================================
+    // API: Users (DynamoDB)
+    // ============================================
+
+    // Fetch utenti da DynamoDB (per loadUsers con source 'dynamodb')
+    async function fetchUsers() {
+        if (!CONFIG.enabled) return null;
+        const response = await fetch(`${CONFIG.endpoint}/users`, {
+            method: 'GET',
+            headers: _getAuthHeaders()
+        });
+        if (!response.ok) {
+            // Fallback: se non admin, prova /users/me
+            if (response.status === 403) return null;
+            throw new Error(`HTTP ${response.status}`);
+        }
+        const data = await response.json();
+        return data.users || [];
+    }
+
+    // Fetch profilo utente corrente
+    async function fetchCurrentUser() {
+        if (!CONFIG.enabled) return null;
+        const response = await fetch(`${CONFIG.endpoint}/users/me`, {
+            method: 'GET',
+            headers: _getAuthHeaders()
+        });
+        if (!response.ok) return null;
+        const data = await response.json();
+        return data.user || null;
+    }
+
+    // Crea o aggiorna utente (solo Admin)
+    async function upsertUser(userData) {
+        const response = await fetch(`${CONFIG.endpoint}/users`, {
+            method: 'POST',
+            headers: _getAuthHeaders(),
+            body: JSON.stringify({ user: userData })
+        });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.error || `HTTP ${response.status}`);
+        }
+        return await response.json();
+    }
+
+    // Elimina utente (solo Admin)
+    async function deleteUser(userId) {
+        const response = await fetch(`${CONFIG.endpoint}/users/${encodeURIComponent(userId)}`, {
+            method: 'DELETE',
+            headers: _getAuthHeaders()
+        });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.error || `HTTP ${response.status}`);
+        }
+        return await response.json();
+    }
+
+    // ============================================
+    // Snapshot mechanism (invariato)
+    // ============================================
+
     // Take a deep snapshot of current schedules state
     function takeSnapshot(schedules) {
         initialSnapshot = JSON.parse(JSON.stringify(schedules));
-        // Persist snapshot to localStorage so it survives page reloads
         try { localStorage.setItem('finops_lastSavedSnapshot', JSON.stringify(initialSnapshot)); } catch {}
     }
 
@@ -183,6 +280,7 @@ const DynamoService = (() => {
     return {
         CONFIG, appEnvKey, extractAppEnvData, mergeIntoSchedules,
         fetchAll, saveOne, saveMultiple,
+        fetchUsers, fetchCurrentUser, upsertUser, deleteUser,
         takeSnapshot, restoreSnapshot, getSnapshot, getModifiedAppEnvs
     };
 })();
