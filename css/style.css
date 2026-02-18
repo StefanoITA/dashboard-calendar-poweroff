@@ -64,13 +64,13 @@
     --bg-hover: #252538;
     --bg-active: #2a2a42;
 
-    --border-subtle: rgba(255, 255, 255, 0.06);
-    --border-default: rgba(255, 255, 255, 0.1);
-    --border-strong: rgba(255, 255, 255, 0.15);
+    --border-subtle: rgba(255, 255, 255, 0.08);
+    --border-default: rgba(255, 255, 255, 0.13);
+    --border-strong: rgba(255, 255, 255, 0.20);
 
-    --text-primary: #e8e8ed;
-    --text-secondary: #9b9bb0;
-    --text-tertiary: #6c6c84;
+    --text-primary: #ededf2;
+    --text-secondary: #b0b0c4;
+    --text-tertiary: #8585a0;
 
     --accent: #ea580c;
     --accent-hover: #f97316;
@@ -2016,7 +2016,7 @@ body {
 .calendar-day.selected { background: var(--accent) !important; color: white !important; border-color: var(--accent) !important; font-weight: 600; }
 .calendar-day.today:not(.selected) { border-color: var(--accent-border); color: var(--accent); font-weight: 700; }
 .calendar-day.empty { cursor: default; }
-.calendar-day.past { color: var(--text-tertiary); opacity: 0.35; cursor: not-allowed; }
+.calendar-day.past { color: var(--text-tertiary); opacity: 0.55; cursor: not-allowed; }
 .calendar-day.weekend:not(.selected) { color: var(--text-tertiary); }
 
 .calendar-actions {
@@ -3426,13 +3426,17 @@ body:not(.is-admin) #exportBtn { display: none !important; }
    Refresh Cooldown
    ============================================ */
 #refreshBtn.cooldown {
-    pointer-events: none;
-    opacity: 0.5;
+    pointer-events: auto;
+    cursor: default;
     position: relative;
 }
 
-#refreshBtn.cooldown svg {
-    opacity: 0.3;
+#refreshBtn.cooldown:hover {
+    background: transparent;
+}
+
+#refreshBtn.cooldown > svg {
+    opacity: 0.15;
 }
 
 .refresh-cooldown-ring {
@@ -3440,21 +3444,22 @@ body:not(.is-admin) #exportBtn { display: none !important; }
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    width: 30px;
-    height: 30px;
+    width: 32px;
+    height: 32px;
     pointer-events: none;
 }
 
 .refresh-cooldown-ring circle {
     fill: none;
-    stroke: var(--accent);
-    stroke-width: 2.5;
+    stroke: var(--accent-hover, #f97316);
+    stroke-width: 3;
     stroke-linecap: round;
     stroke-dasharray: 81.68;  /* 2 * PI * 13 */
     stroke-dashoffset: 0;
     transform: rotate(-90deg);
     transform-origin: center;
     transition: stroke-dashoffset 1s linear;
+    filter: drop-shadow(0 0 3px rgba(249, 115, 22, 0.4));
 }
 
 .refresh-cooldown-text {
@@ -3462,11 +3467,36 @@ body:not(.is-admin) #exportBtn { display: none !important; }
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    font-size: 0.6rem;
-    font-weight: 700;
-    color: var(--accent);
+    font-size: 0.72rem;
+    font-weight: 800;
+    color: var(--accent-text, #fb923c);
     font-family: var(--font-mono);
     pointer-events: none;
+    text-shadow: 0 0 6px rgba(249, 115, 22, 0.3);
+}
+
+.refresh-cooldown-hint {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-default);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    box-shadow: var(--shadow-md);
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+    pointer-events: none;
+    z-index: 9999;
+}
+
+#refreshBtn.cooldown:hover .refresh-cooldown-hint {
+    opacity: 1;
+    transform: translateY(0);
 }
 
 .user-mgmt-table thead th {

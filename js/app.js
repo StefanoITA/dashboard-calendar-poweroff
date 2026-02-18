@@ -3129,17 +3129,21 @@ const App = (() => {
         refreshBtn.classList.add('cooldown');
         refreshBtn.title = '';
 
-        // Add SVG ring + countdown text
+        // Add SVG ring + countdown text + hover hint
         const circumference = 2 * Math.PI * 13; // radius=13
         const ring = document.createElement('div');
         ring.className = 'refresh-cooldown-ring';
         ring.innerHTML = `<svg viewBox="0 0 30 30"><circle cx="15" cy="15" r="13"/></svg>`;
         const text = document.createElement('div');
         text.className = 'refresh-cooldown-text';
+        const hint = document.createElement('div');
+        hint.className = 'refresh-cooldown-hint';
+        hint.textContent = 'Attendi la fine del cooldown per poter aggiornare nuovamente lo stato';
 
         refreshBtn.style.position = 'relative';
         refreshBtn.appendChild(ring);
         refreshBtn.appendChild(text);
+        refreshBtn.appendChild(hint);
 
         const circle = ring.querySelector('circle');
         let remaining = seconds;
@@ -3157,6 +3161,7 @@ const App = (() => {
                 refreshBtn.title = 'Aggiorna stato';
                 ring.remove();
                 text.remove();
+                hint.remove();
                 return;
             }
             remaining--;
