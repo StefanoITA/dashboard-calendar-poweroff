@@ -366,6 +366,135 @@ const DataManager = (() => {
         return schedules[key] || [];
     }
 
+    // ============================================
+    // Validazione Schedule
+    // ============================================
+
+    function _timeToMinutes(timeStr) {
+        if (!timeStr || !timeStr.includes(':')) return -1;
+        const [h, m] = timeStr.split(':').map(Number);
+        if (isNaN(h) || isNaN(m) || h < 0 || h > 23 || m < 0 || m > 59) return -1;
+        return h * 60 + m;
+    }
+
+    /**
+     * Controlla se una nuova entry ha sovrapposizione di orari con entry esistenti
+     * sulla stessa macchina e stesso pattern ricorrente/date.
+     *
+     * Ritorna: { valid: true } oppure { valid: false, reason: '...' }
+     */
+    function validateScheduleOverlap(appName, envName, hostname, newEntry, excludeEntryId) {
+        if (newEntry.type !== 'window') return { valid: true };
+
+        const newStart = _timeToMinutes(newEntry.startTime);
+        const newStop = _timeToMinutes(newEntry.stopTime);
+        if (newStart < 0 || newStop < 0) return { valid: false, reason: 'Orario non valido' };
+        if (newStart >= newStop) return { valid: false, reason: 'L\'orario di avvio deve essere prima dell\'orario di spegnimento' };
+
+        const existing = getScheduleEntries(appName, envName, hostname);
+        for (const entry of existing) {
+            if (excludeEntryId && entry.id === excludeEntryId) continue;
+            if (entry.type !== 'window') continue;
+
+            const exStart = _timeToMinutes(entry.startTime);
+            const exStop = _timeToMinutes(entry.stopTime);
+            if (exStart < 0 || exStop < 0) continue;
+
+            // Controlla se i pattern ricorrenti si intersecano
+            if (!_recurringOverlaps(newEntry, entry)) continue;
+
+            // Controlla sovrapposizione orari: [newStart, newStop) ∩ [exStart, exStop)
+            if (newStart < exStop && newStop > exStart) {
+                return {
+                    valid: false,
+                    reason: `Sovrapposizione con schedulazione esistente (${entry.startTime}-${entry.stopTime})`
+                };
+            }
+        }
+        return { valid: true };
+    }
+
+    /**
+     * Controlla se due entry hanno pattern ricorrenti che si intersecano.
+     * daily si interseca con tutto. weekdays e weekends non si intersecano tra loro.
+     * one-time si intersecano solo se hanno almeno una data in comune.
+     */
+    function _recurringOverlaps(a, b) {
+        const ra = a.recurring || 'none';
+        const rb = b.recurring || 'none';
+
+        // daily si interseca con tutto
+        if (ra === 'daily' || rb === 'daily') return true;
+
+        // weekdays vs weekends non si intersecano
+        if ((ra === 'weekdays' && rb === 'weekends') || (ra === 'weekends' && rb === 'weekdays')) return false;
+
+        // stessa ricorrenza → si intersecano
+        if (ra === rb && ra !== 'none') return true;
+
+        // weekdays/weekends vs one-time: dipende dai giorni selezionati
+        if ((ra === 'weekdays' || ra === 'weekends') && rb === 'none') {
+            return _datesOverlapRecurring(b.dates || [], ra);
+        }
+        if ((rb === 'weekdays' || rb === 'weekends') && ra === 'none') {
+            return _datesOverlapRecurring(a.dates || [], rb);
+        }
+
+        // one-time vs one-time: almeno una data in comune
+        if (ra === 'none' && rb === 'none') {
+            const setA = new Set(a.dates || []);
+            return (b.dates || []).some(d => setA.has(d));
+        }
+
+        return false;
+    }
+
+    function _datesOverlapRecurring(dates, recurringType) {
+        for (const d of dates) {
+            try {
+                const dow = new Date(d).getDay(); // 0=Sun, 6=Sat
+                if (recurringType === 'weekdays' && dow >= 1 && dow <= 5) return true;
+                if (recurringType === 'weekends' && (dow === 0 || dow === 6)) return true;
+            } catch (_) { /* skip */ }
+        }
+        return false;
+    }
+
+    /**
+     * Per una data specifica, restituisce le finestre occupate sulla macchina,
+     * considerando sia le ricorrenze sia le date one-time.
+     * Ritorna array di { startMin, stopMin, label } per ogni finestra che copre quel giorno.
+     */
+    function getOccupiedWindows(appName, envName, hostname, dateStr) {
+        const existing = getScheduleEntries(appName, envName, hostname);
+        const windows = [];
+        let dow;
+        try {
+            dow = new Date(dateStr).getDay();
+        } catch (_) {
+            return windows;
+        }
+
+        for (const entry of existing) {
+            if (entry.type !== 'window') continue;
+            const s = _timeToMinutes(entry.startTime);
+            const e = _timeToMinutes(entry.stopTime);
+            if (s < 0 || e < 0 || s >= e) continue;
+
+            const rec = entry.recurring || 'none';
+            let applies = false;
+            if (rec === 'daily') applies = true;
+            else if (rec === 'weekdays' && dow >= 1 && dow <= 5) applies = true;
+            else if (rec === 'weekends' && (dow === 0 || dow === 6)) applies = true;
+            else if (rec === 'none' && (entry.dates || []).includes(dateStr)) applies = true;
+
+            if (applies) {
+                windows.push({ startMin: s, stopMin: e, label: `${entry.startTime}-${entry.stopTime}` });
+            }
+        }
+        return windows;
+    }
+
     function addScheduleEntry(appName, envName, hostname, entry) {
         const key = scheduleKey(appName, envName, hostname);
         if (!schedules[key]) schedules[key] = [];
@@ -401,9 +530,15 @@ const DataManager = (() => {
 
     function addEntryForEnv(appName, envName, entry) {
         const groupId = generateId();
-        getMachines(appName, envName).forEach(m => {
-            addScheduleEntry(appName, envName, m.hostname, { ...entry, envGroupId: groupId });
+        const ms = getMachines(appName, envName);
+        // Batch: add to all machines THEN save once (not per-machine)
+        ms.forEach(m => {
+            const key = scheduleKey(appName, envName, m.hostname);
+            if (!schedules[key]) schedules[key] = [];
+            const clone = { ...entry, id: generateId(), envGroupId: groupId };
+            schedules[key].push(clone);
         });
+        saveSchedulesToStorage();
         return groupId;
     }
 
@@ -722,7 +857,7 @@ const DataManager = (() => {
         canAccessApp, getAccessibleAppEnvPairs,
         getApplications, getEnvironments, getMachines,
         getScheduleEntries, addScheduleEntry, updateScheduleEntry, removeScheduleEntry,
-        removeAllSchedules, addEntryForEnv,
+        removeAllSchedules, addEntryForEnv, validateScheduleOverlap, getOccupiedWindows,
         exportSchedules, getAllSchedulesFlat, getStats, envHasSchedules, getEnvScheduleStats,
         getSchedulesRef, getMessages, getUpcomingSchedules,
         getNotes, addNote, updateNote, deleteNote, getAllNotesCount,

@@ -303,6 +303,10 @@ const App = (() => {
 
     function updateTimePickerDisplay(picker) {
         picker.querySelector('.time-picker-value').textContent = `${picker.dataset.hour}:${picker.dataset.min}`;
+        // Re-render calendar to update conflict highlighting when times change
+        if (currentRecurring === 'none' && document.getElementById('calendarGrid')) {
+            renderCalendar();
+        }
     }
 
     function getTimePickerValue(id) {
@@ -312,11 +316,12 @@ const App = (() => {
 
     function setTimePickerValue(id, time) {
         const picker = $(`#${id}`);
-        const [h, m] = time.split(':');
-        picker.dataset.hour = h.padStart(2, '0');
-        const mNum = parseInt(m);
-        const rounded = String(Math.round(mNum / 5) * 5).padStart(2, '0');
-        picker.dataset.min = rounded === '60' ? '55' : rounded;
+        const parts = (time || '00:00').split(':');
+        let h = Math.max(0, Math.min(23, parseInt(parts[0]) || 0));
+        let m = Math.max(0, Math.min(59, parseInt(parts[1]) || 0));
+        picker.dataset.hour = String(h).padStart(2, '0');
+        const rounded = Math.min(55, Math.round(m / 5) * 5);
+        picker.dataset.min = String(rounded).padStart(2, '0');
         updateTimePickerDisplay(picker);
     }
 
@@ -1548,13 +1553,61 @@ const App = (() => {
             showToast('Seleziona almeno un giorno o una ricorrenza', 'error');
             return;
         }
+
+        const startTime = currentScheduleType === 'window' ? getTimePickerValue('startTimePicker') : null;
+        const stopTime = currentScheduleType === 'window' ? getTimePickerValue('stopTimePicker') : null;
+
+        // Validazione: startTime deve essere prima di stopTime
+        if (currentScheduleType === 'window') {
+            const [sh, sm] = startTime.split(':').map(Number);
+            const [eh, em] = stopTime.split(':').map(Number);
+            if (sh * 60 + sm >= eh * 60 + em) {
+                showToast('L\'orario di avvio deve essere prima dell\'orario di spegnimento', 'error');
+                return;
+            }
+        }
+
         const entry = {
             type: currentScheduleType,
-            startTime: currentScheduleType === 'window' ? getTimePickerValue('startTimePicker') : null,
-            stopTime: currentScheduleType === 'window' ? getTimePickerValue('stopTimePicker') : null,
+            startTime,
+            stopTime,
             recurring: currentRecurring,
             dates: currentRecurring === 'none' ? Array.from(selectedDates).sort() : []
         };
+
+        // Validazione sovrapposizione per macchina singola
+        if (modalTarget.type === 'machine' && currentScheduleType === 'window') {
+            const check = DataManager.validateScheduleOverlap(
+                modalTarget.app, modalTarget.env, modalTarget.hostname,
+                entry, editingEntryId || undefined
+            );
+            if (!check.valid) {
+                showToast(check.reason, 'error');
+                return;
+            }
+        }
+
+        // Validazione sovrapposizione per ambiente intero
+        if ((modalTarget.type === 'environment' || modalTarget.type === 'environment-edit') && currentScheduleType === 'window') {
+            const machines = DataManager.getMachines(modalTarget.app, modalTarget.env);
+            const conflicts = [];
+            for (const m of machines) {
+                const excludeId = modalTarget.type === 'environment-edit' ? undefined : undefined;
+                const check = DataManager.validateScheduleOverlap(
+                    modalTarget.app, modalTarget.env, m.hostname,
+                    entry, excludeId
+                );
+                if (!check.valid) {
+                    conflicts.push(m.hostname);
+                }
+            }
+            if (conflicts.length > 0) {
+                const preview = conflicts.slice(0, 3).join(', ');
+                const more = conflicts.length > 3 ? ` e altri ${conflicts.length - 3}` : '';
+                showToast(`Sovrapposizione orari su: ${preview}${more}`, 'error');
+                return;
+            }
+        }
 
         if (modalTarget.type === 'machine') {
             if (editingEntryId) {
@@ -1585,6 +1638,34 @@ const App = (() => {
     // ============================================
     // Calendar (Modal)
     // ============================================
+    function _isDateConflicting(dateStr) {
+        // Only check for window type and single-machine targets
+        if (currentScheduleType !== 'window') return false;
+        if (!modalTarget || !modalTarget.hostname) return false;
+
+        const startTime = getTimePickerValue('startTimePicker');
+        const stopTime = getTimePickerValue('stopTimePicker');
+        const [sh, sm] = startTime.split(':').map(Number);
+        const [eh, em] = stopTime.split(':').map(Number);
+        const newStart = sh * 60 + sm;
+        const newStop = eh * 60 + em;
+        if (newStart >= newStop) return false;
+
+        const windows = DataManager.getOccupiedWindows(
+            modalTarget.app, modalTarget.env, modalTarget.hostname, dateStr
+        );
+        for (const w of windows) {
+            // Skip the entry being edited
+            if (editingEntryId) {
+                const entries = DataManager.getScheduleEntries(modalTarget.app, modalTarget.env, modalTarget.hostname);
+                const editEntry = entries.find(e => e.id === editingEntryId);
+                if (editEntry && w.label === `${editEntry.startTime}-${editEntry.stopTime}`) continue;
+            }
+            if (newStart < w.stopMin && newStop > w.startMin) return true;
+        }
+        return false;
+    }
+
     function renderCalendar() {
         const grid = $('#calendarGrid');
         if (!grid) return;
@@ -1611,6 +1692,7 @@ const App = (() => {
             const isToday = date.getTime() === today.getTime();
             const isWeekend = dow === 0 || dow === 6;
             const isSelected = selectedDates.has(dateStr);
+            const isConflicting = !isPast && _isDateConflicting(dateStr);
 
             const cell = document.createElement('div');
             let cls = 'calendar-day';
@@ -1618,10 +1700,17 @@ const App = (() => {
             if (isToday) cls += ' today';
             if (isWeekend) cls += ' weekend';
             if (isSelected) cls += ' selected';
+            if (isConflicting && !isSelected) cls += ' occupied';
             cell.className = cls;
             cell.textContent = d;
             cell.dataset.date = dateStr;
-            if (!isPast) cell.addEventListener('click', toggleDate);
+            if (isConflicting && !isSelected) {
+                cell.title = 'Esiste già una schedulazione in questo orario';
+            }
+            if (!isPast && !isConflicting) cell.addEventListener('click', toggleDate);
+            else if (isConflicting && !isPast) cell.addEventListener('click', () => {
+                showToast('Esiste già una schedulazione per questo orario in questa data', 'error');
+            });
             fragment.appendChild(cell);
         }
         grid.innerHTML = '';
@@ -1645,7 +1734,10 @@ const App = (() => {
             const date = new Date(year, month, d);
             if (date < today) continue;
             const dow = date.getDay();
-            if (dow >= 1 && dow <= 5) selectedDates.add(`${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+            const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+            if (dow >= 1 && dow <= 5 && !_isDateConflicting(dateStr)) {
+                selectedDates.add(dateStr);
+            }
         }
         renderCalendar();
     }

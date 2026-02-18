@@ -2017,6 +2017,26 @@ body {
 .calendar-day.today:not(.selected) { border-color: var(--accent-border); color: var(--accent); font-weight: 700; }
 .calendar-day.empty { cursor: default; }
 .calendar-day.past { color: var(--text-tertiary); opacity: 0.55; cursor: not-allowed; }
+.calendar-day.occupied {
+    color: var(--text-tertiary);
+    opacity: 0.45;
+    cursor: not-allowed;
+    position: relative;
+    background: var(--danger-subtle) !important;
+    border-color: var(--danger) !important;
+}
+.calendar-day.occupied::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 60%;
+    height: 2px;
+    background: var(--danger);
+    transform: translate(-50%, -50%) rotate(-45deg);
+    opacity: 0.5;
+    border-radius: 1px;
+}
 .calendar-day.weekend:not(.selected) { color: var(--text-tertiary); }
 
 .calendar-actions {
