@@ -11,28 +11,32 @@ Output:
   Testo plain in formato crontab con:
   - Commenti per identificare applicazione / ambiente
   - Una riga per ogni azione (start/stop) per ogni macchina
-  - Formato: <cron_expression>  <hostname>  <action>
+  - Formato: <cron_expression> <hostname> <action>
 
 Variabili d'ambiente:
   EXPORTER_TOKEN      — Token statico per autenticazione (obbligatorio)
   SCHEDULES_TABLE     — Nome tabella DynamoDB (default: FinOpsShutdownScheduler)
-  AWS_REGION          — Regione AWS (default: eu-west-1)
   DEBUG               — Abilita log di debug (default: false)
 
 Edge case gestiti:
   - Schedule ambiente-wide (envGroupId): già espanse per macchina in DynamoDB
   - Eccezioni: macchine escluse non hanno l'entry con quel envGroupId
-  - Deduplicazione: se due entry generano lo stesso cronjob (stessa macchina, stesso
-    orario, stessa azione), viene mantenuta una sola riga
-  - Date specifiche: raggruppate per mese per compattezza
+  - Merge finestre sovrapposte: se due window si sovrappongono sulla stessa macchina
+    e stesso pattern ricorrente, viene preso lo start più presto e lo stop più tardi
+  - Deduplicazione: dopo il merge, cron identici (stessa macchina, stessa expression,
+    stessa action) producono una sola riga
+  - Validazione orari: ore 0-23, minuti 0-59, startTime < stopTime per window
+  - Date specifiche: raggruppate per mese per compattezza, validate (mese 1-12, giorno 1-31)
   - Tipi schedule: window (start+stop) e shutdown (solo stop)
   - Recurring: daily, weekdays, weekends, one-time (dates)
+  - Output deterministico: ordinato per app → env → hostname
 """
 
 import json
 import os
 import time
 import traceback
+from collections import defaultdict
 
 import boto3
 import botocore.exceptions
@@ -43,6 +47,11 @@ import botocore.exceptions
 EXPORTER_TOKEN = os.environ.get("EXPORTER_TOKEN", "")
 SCHEDULES_TABLE = os.environ.get("SCHEDULES_TABLE", "FinOpsShutdownScheduler")
 DEBUG = os.environ.get("DEBUG", "false").lower() in ("true", "1", "yes")
+
+_VALID_RECURRING = {"daily", "weekdays", "weekends", "none"}
+_VALID_TYPES = {"window", "shutdown"}
+_DAYS_IN_MONTH = {1: 31, 2: 29, 3: 31, 4: 30, 5: 31, 6: 30,
+                  7: 31, 8: 31, 9: 30, 10: 31, 11: 30, 12: 31}
 
 
 # ============================================
@@ -89,19 +98,198 @@ def _scan_all_schedules():
 
 
 # ============================================
-# Generazione Cronjob
+# Validazione
 # ============================================
 def _parse_time(time_str):
-    """Parsa 'HH:MM' e ritorna (hour, minute). Ritorna (0, 0) se invalido."""
-    if not time_str or ":" not in time_str:
-        return (0, 0)
+    """Parsa 'HH:MM' e ritorna (hour, minute) o None se invalido."""
+    if not time_str or not isinstance(time_str, str) or ":" not in time_str:
+        return None
     try:
         parts = time_str.split(":")
-        return (int(parts[0]), int(parts[1]))
+        h, m = int(parts[0]), int(parts[1])
+        if 0 <= h <= 23 and 0 <= m <= 59:
+            return (h, m)
+        _log("WARN", "Orario fuori range", time_str=time_str, hour=h, minute=m)
+        return None
     except (ValueError, IndexError):
-        return (0, 0)
+        _log("WARN", "Orario non parsabile", time_str=time_str)
+        return None
 
 
+def _time_to_minutes(h, m):
+    """Converte ore e minuti in minuti dall'inizio del giorno."""
+    return h * 60 + m
+
+
+def _validate_entry(entry, hostname):
+    """Valida un singolo entry di schedule. Ritorna l'entry normalizzato o None."""
+    entry_type = entry.get("type", "")
+    recurring = entry.get("recurring", "none")
+
+    if entry_type not in _VALID_TYPES:
+        _log("WARN", "Tipo entry non valido, ignorato",
+             hostname=hostname, type=entry_type)
+        return None
+
+    if recurring not in _VALID_RECURRING:
+        _log("WARN", "Ricorrenza non valida, ignorata",
+             hostname=hostname, recurring=recurring)
+        return None
+
+    if entry_type == "window":
+        start = _parse_time(entry.get("startTime"))
+        stop = _parse_time(entry.get("stopTime"))
+        if start is None or stop is None:
+            _log("WARN", "Orario mancante o invalido per window, ignorato",
+                 hostname=hostname,
+                 startTime=entry.get("startTime"),
+                 stopTime=entry.get("stopTime"))
+            return None
+        if _time_to_minutes(*start) >= _time_to_minutes(*stop):
+            _log("WARN", "startTime >= stopTime per window, ignorato",
+                 hostname=hostname,
+                 startTime=entry.get("startTime"),
+                 stopTime=entry.get("stopTime"))
+            return None
+
+    # Valida date per schedule one-time
+    if recurring == "none":
+        dates = entry.get("dates", [])
+        if not dates or not isinstance(dates, list):
+            _log("WARN", "Schedule one-time senza date, ignorata", hostname=hostname)
+            return None
+        valid_dates = []
+        for d in dates:
+            if not isinstance(d, str) or len(d) != 10:
+                continue
+            try:
+                parts = d.split("-")
+                y, mo, day = int(parts[0]), int(parts[1]), int(parts[2])
+                if 1 <= mo <= 12 and 1 <= day <= _DAYS_IN_MONTH.get(mo, 31):
+                    valid_dates.append(d)
+                else:
+                    _log("WARN", "Data fuori range, ignorata", date=d, hostname=hostname)
+            except (ValueError, IndexError):
+                _log("WARN", "Data non parsabile, ignorata", date=d, hostname=hostname)
+        if not valid_dates:
+            _log("WARN", "Nessuna data valida per entry one-time, ignorata",
+                 hostname=hostname)
+            return None
+        entry = dict(entry)
+        entry["dates"] = valid_dates
+
+    return entry
+
+
+# ============================================
+# Merge finestre sovrapposte
+# ============================================
+def _merge_overlapping_windows(entries):
+    """
+    Per ogni pattern ricorrente, se ci sono più window che si sovrappongono,
+    le fonde prendendo lo start più presto e lo stop più tardi.
+
+    Esempio:
+      Entry A: 08:00-20:00 daily
+      Entry B: 09:00-22:00 daily
+      → Merge: 08:00-22:00 daily
+
+    Le entry di tipo 'shutdown' non vengono toccate.
+    Le date one-time vengono raggruppate per pattern (stesso set di date).
+    """
+    if not entries:
+        return entries
+
+    # Separa shutdown da window
+    shutdowns = [e for e in entries if e.get("type") != "window"]
+    windows = [e for e in entries if e.get("type") == "window"]
+
+    if len(windows) <= 1:
+        return entries
+
+    # Raggruppa window per chiave ricorrente
+    # Per recurring: la chiave è il valore (daily, weekdays, weekends)
+    # Per one-time: la chiave è la tupla di date ordinate
+    groups = defaultdict(list)
+    for w in windows:
+        recurring = w.get("recurring", "none")
+        if recurring == "none":
+            # Raggruppa per date identiche
+            dates_key = tuple(sorted(w.get("dates", [])))
+            key = ("dates", dates_key)
+        else:
+            key = ("recurring", recurring)
+        groups[key].append(w)
+
+    merged_windows = []
+    for group_key, group_entries in groups.items():
+        if len(group_entries) == 1:
+            merged_windows.append(group_entries[0])
+            continue
+
+        # Merge: prendi start più presto, stop più tardi
+        merged = _merge_time_ranges(group_entries)
+        merged_windows.extend(merged)
+
+    return shutdowns + merged_windows
+
+
+def _merge_time_ranges(entries):
+    """
+    Fonde entry con finestre sovrapposte o adiacenti.
+    Usa algoritmo di merge intervalli classico.
+    """
+    # Converti in intervalli (start_min, stop_min, entry)
+    intervals = []
+    for e in entries:
+        start = _parse_time(e.get("startTime"))
+        stop = _parse_time(e.get("stopTime"))
+        if start is None or stop is None:
+            continue
+        s_min = _time_to_minutes(*start)
+        e_min = _time_to_minutes(*stop)
+        if s_min < e_min:
+            intervals.append((s_min, e_min, e))
+
+    if not intervals:
+        return entries
+
+    # Ordina per start
+    intervals.sort(key=lambda x: x[0])
+
+    # Merge
+    merged = []
+    curr_start, curr_end, curr_entry = intervals[0]
+    for s, e, entry in intervals[1:]:
+        if s <= curr_end:
+            # Sovrapposto o adiacente: estendi
+            if e > curr_end:
+                curr_end = e
+            _log("DEBUG", "Merge finestre sovrapposte",
+                 original_start=curr_entry.get("startTime"),
+                 original_stop=curr_entry.get("stopTime"),
+                 overlap_start=entry.get("startTime"),
+                 overlap_stop=entry.get("stopTime"))
+        else:
+            # Non sovrapposto: chiudi corrente, apri nuovo
+            merged.append(_build_merged_entry(curr_entry, curr_start, curr_end))
+            curr_start, curr_end, curr_entry = s, e, entry
+
+    merged.append(_build_merged_entry(curr_entry, curr_start, curr_end))
+    return merged
+
+
+def _build_merged_entry(template_entry, start_min, end_min):
+    """Costruisce un entry con gli orari dal merge, preservando il resto dal template."""
+    result = dict(template_entry)
+    result["startTime"] = f"{start_min // 60:02d}:{start_min % 60:02d}"
+    result["stopTime"] = f"{end_min // 60:02d}:{end_min % 60:02d}"
+    return result
+
+
+# ============================================
+# Generazione Cronjob
+# ============================================
 def _generate_crons_for_entry(entry):
     """
     Converte un singolo entry di schedule in una lista di tuple (action, cron_expression).
@@ -118,11 +306,18 @@ def _generate_crons_for_entry(entry):
     """
     entry_type = entry.get("type", "")
     recurring = entry.get("recurring", "none")
-    start_h, start_m = _parse_time(entry.get("startTime"))
-    stop_h, stop_m = _parse_time(entry.get("stopTime"))
     dates = entry.get("dates", [])
-
     crons = []
+
+    if entry_type == "window":
+        start = _parse_time(entry.get("startTime"))
+        stop = _parse_time(entry.get("stopTime"))
+        if start is None or stop is None:
+            return crons
+        start_h, start_m = start
+        stop_h, stop_m = stop
+    else:
+        start_h = start_m = stop_h = stop_m = 0
 
     if recurring == "daily":
         if entry_type == "window":
@@ -158,10 +353,10 @@ def _generate_crons_for_entry(entry):
                     by_month[year_month] = {"month": month, "days": []}
                 by_month[year_month]["days"].append(day)
             except (ValueError, IndexError):
-                _log("WARN", "Data non valida ignorata", date=d)
                 continue
 
-        for group in by_month.values():
+        for ym_key in sorted(by_month.keys()):
+            group = by_month[ym_key]
             days_str = ",".join(str(d) for d in sorted(group["days"]))
             month = group["month"]
             if entry_type == "window":
@@ -173,22 +368,25 @@ def _generate_crons_for_entry(entry):
     return crons
 
 
+# ============================================
+# Output Builder
+# ============================================
 def _build_cronjob_output(items):
     """
     Costruisce l'output testuale completo dei cronjob.
+
+    Pipeline per ogni macchina:
+      1. Validazione entry (scarta invalidi con log)
+      2. Merge finestre sovrapposte (per stesso recurring pattern)
+      3. Generazione cron expressions
+      4. Deduplicazione finale (stessa expression + action = una riga)
 
     Struttura output:
       # =========================================
       # Applicazione: <app> | Ambiente: <env>
       # =========================================
       # <hostname>
-      <cron_expression>  <hostname>  <action>
-      ...
-
-    Deduplicazione:
-      Per ogni macchina, se due entry generano la stessa combinazione
-      (expression, action) viene mantenuta una sola riga, evitando
-      conflitti (es. due start identici allo stesso minuto).
+      <cron_expression> <hostname> <action>
     """
     # Ordina items per app, poi per env, per output deterministico
     sorted_items = sorted(items, key=lambda x: (
@@ -197,7 +395,7 @@ def _build_cronjob_output(items):
     ))
 
     lines = []
-    lines.append(f"# FinOps Cronjob Export")
+    lines.append("# FinOps Cronjob Export")
     lines.append(f"# Generato: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}")
     lines.append(f"# Tabella: {SCHEDULES_TABLE}")
     lines.append("")
@@ -205,19 +403,17 @@ def _build_cronjob_output(items):
     total_crons = 0
     total_machines = 0
     total_envs = 0
+    warnings = 0
 
     for item in sorted_items:
         app = item.get("app", item.get("app_env", "???"))
         env = item.get("env", "")
         schedules = item.get("schedules", {})
 
-        if not schedules:
+        if not schedules or not isinstance(schedules, dict):
             continue
 
-        # Ordina hostname per output deterministico
         sorted_hostnames = sorted(schedules.keys())
-
-        # Raccogli tutti i cronjob per questo ambiente
         env_crons = []
 
         for hostname in sorted_hostnames:
@@ -225,17 +421,37 @@ def _build_cronjob_output(items):
             if not entries or not isinstance(entries, list):
                 continue
 
-            # Set per deduplicazione per questa macchina
-            # Chiave: (expression, action) → garantisce che non ci siano duplicati
+            # Step 1: Validazione
+            valid_entries = []
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    _log("WARN", "Entry non è un dizionario, ignorata",
+                         hostname=hostname, entry_type=type(entry).__name__)
+                    warnings += 1
+                    continue
+                validated = _validate_entry(entry, hostname)
+                if validated is None:
+                    warnings += 1
+                    continue
+                valid_entries.append(validated)
+
+            if not valid_entries:
+                continue
+
+            # Step 2: Merge finestre sovrapposte
+            merged_entries = _merge_overlapping_windows(valid_entries)
+
+            # Step 3: Genera cron
+            # Step 4: Deduplicazione
             seen = set()
             machine_crons = []
 
-            for entry in entries:
+            for entry in merged_entries:
                 crons = _generate_crons_for_entry(entry)
                 for action, expression in crons:
                     dedup_key = (expression, action)
                     if dedup_key in seen:
-                        _log("DEBUG", "Cronjob duplicato rimosso",
+                        _log("DEBUG", "Cronjob duplicato rimosso dopo merge",
                              hostname=hostname, action=action,
                              expression=expression)
                         continue
@@ -252,9 +468,9 @@ def _build_cronjob_output(items):
         total_envs += 1
 
         # Intestazione ambiente
-        lines.append(f"# =========================================")
+        lines.append("# =========================================")
         lines.append(f"# Applicazione: {app} | Ambiente: {env}")
-        lines.append(f"# =========================================")
+        lines.append("# =========================================")
 
         # Raggruppa per hostname per leggibilità
         current_hostname = None
@@ -262,15 +478,17 @@ def _build_cronjob_output(items):
             if hostname != current_hostname:
                 lines.append(f"# {hostname}")
                 current_hostname = hostname
-            lines.append(f"{expression}  {hostname}  {action}")
+            lines.append(f"{expression} {hostname} {action}")
             total_crons += 1
 
         lines.append("")
 
     # Footer con statistiche
-    lines.append(f"# ---")
+    lines.append("# ---")
     lines.append(f"# Totale: {total_crons} cronjob, "
                  f"{total_machines} macchine, {total_envs} ambienti")
+    if warnings > 0:
+        lines.append(f"# Attenzione: {warnings} entry ignorate (vedi log per dettagli)")
 
     return "\n".join(lines)
 
@@ -337,9 +555,9 @@ def lambda_handler(event, context):
         if not items:
             _log("INFO", "Nessuna schedule trovata in DynamoDB")
             return _text_response(200, (
-                f"# FinOps Cronjob Export\n"
+                "# FinOps Cronjob Export\n"
                 f"# Generato: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}\n"
-                f"# Nessuna schedule configurata.\n"
+                "# Nessuna schedule configurata.\n"
             ))
 
         output = _build_cronjob_output(items)
