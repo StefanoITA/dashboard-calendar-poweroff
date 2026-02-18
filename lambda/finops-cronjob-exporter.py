@@ -478,7 +478,9 @@ def _build_cronjob_output(items):
             if hostname != current_hostname:
                 lines.append(f"# {hostname}")
                 current_hostname = hostname
-            lines.append(f"{expression} {action} MPI {hostname} {app} {env}")
+            safe_app = app.replace(" ", "_")
+            safe_env = env.replace(" ", "_")
+            lines.append(f"{expression} {action} MPI {hostname} {safe_app} {safe_env}")
             total_crons += 1
 
         lines.append("")
