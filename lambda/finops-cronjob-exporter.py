@@ -11,7 +11,7 @@ Output:
   Testo plain in formato crontab con:
   - Commenti per identificare applicazione / ambiente
   - Una riga per ogni azione (start/stop) per ogni macchina
-  - Formato: <cron_expression> <hostname> <action>
+  - Formato: <cron_expression> <action> MPI <hostname> <application_name> <environment>
 
 Variabili d'ambiente:
   EXPORTER_TOKEN      — Token statico per autenticazione (obbligatorio)
@@ -386,7 +386,7 @@ def _build_cronjob_output(items):
       # Applicazione: <app> | Ambiente: <env>
       # =========================================
       # <hostname>
-      <cron_expression> <hostname> <action>
+      <cron_expression> <action> MPI <hostname> <app> <env>
     """
     # Ordina items per app, poi per env, per output deterministico
     sorted_items = sorted(items, key=lambda x: (
@@ -456,7 +456,7 @@ def _build_cronjob_output(items):
                              expression=expression)
                         continue
                     seen.add(dedup_key)
-                    machine_crons.append((expression, hostname, action))
+                    machine_crons.append((expression, action, hostname))
 
             if machine_crons:
                 env_crons.extend(machine_crons)
@@ -474,11 +474,11 @@ def _build_cronjob_output(items):
 
         # Raggruppa per hostname per leggibilità
         current_hostname = None
-        for expression, hostname, action in env_crons:
+        for expression, action, hostname in env_crons:
             if hostname != current_hostname:
                 lines.append(f"# {hostname}")
                 current_hostname = hostname
-            lines.append(f"{expression} {hostname} {action}")
+            lines.append(f"{expression} {action} MPI {hostname} {app} {env}")
             total_crons += 1
 
         lines.append("")
