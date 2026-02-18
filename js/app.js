@@ -3060,10 +3060,18 @@ const App = (() => {
         return new Promise(resolve => {
             // Remove any existing tooltip
             const existing = document.querySelector('.refresh-confirm-tooltip');
-            if (existing) { existing.remove(); resolve(false); return; }
+            if (existing) { existing.remove(); }
+            const existingBackdrop = document.querySelector('.refresh-confirm-backdrop');
+            if (existingBackdrop) { existingBackdrop.remove(); }
+            if (existing) { resolve(false); return; }
 
             const refreshBtn = $('#refreshBtn');
             const rect = refreshBtn.getBoundingClientRect();
+
+            // Semi-transparent backdrop
+            const backdrop = document.createElement('div');
+            backdrop.className = 'refresh-confirm-backdrop';
+            document.body.appendChild(backdrop);
 
             const tooltip = document.createElement('div');
             tooltip.className = 'refresh-confirm-tooltip';
@@ -3082,16 +3090,18 @@ const App = (() => {
             document.body.appendChild(tooltip);
 
             // Position below the refresh button
-            const tooltipRect = tooltip.getBoundingClientRect();
             tooltip.style.top = (rect.bottom + 8) + 'px';
             tooltip.style.right = (window.innerWidth - rect.right) + 'px';
 
-            requestAnimationFrame(() => tooltip.classList.add('show'));
+            requestAnimationFrame(() => {
+                backdrop.classList.add('show');
+                tooltip.classList.add('show');
+            });
 
             const cleanup = (result) => {
                 tooltip.classList.remove('show');
-                setTimeout(() => tooltip.remove(), 150);
-                document.removeEventListener('click', outsideClick);
+                backdrop.classList.remove('show');
+                setTimeout(() => { tooltip.remove(); backdrop.remove(); }, 150);
                 resolve(result);
             };
 
@@ -3104,12 +3114,7 @@ const App = (() => {
                 cleanup(true);
             });
 
-            const outsideClick = (e) => {
-                if (!tooltip.contains(e.target) && e.target !== refreshBtn) {
-                    cleanup(false);
-                }
-            };
-            setTimeout(() => document.addEventListener('click', outsideClick), 10);
+            backdrop.addEventListener('click', () => cleanup(false));
         });
     }
 
@@ -3117,9 +3122,52 @@ const App = (() => {
     // Refresh / Fetch State
     // ============================================
     let isRefreshing = false;
+    let refreshCooldownTimer = null;
+
+    function startRefreshCooldown(seconds) {
+        const refreshBtn = $('#refreshBtn');
+        refreshBtn.classList.add('cooldown');
+        refreshBtn.title = '';
+
+        // Add SVG ring + countdown text
+        const circumference = 2 * Math.PI * 13; // radius=13
+        const ring = document.createElement('div');
+        ring.className = 'refresh-cooldown-ring';
+        ring.innerHTML = `<svg viewBox="0 0 30 30"><circle cx="15" cy="15" r="13"/></svg>`;
+        const text = document.createElement('div');
+        text.className = 'refresh-cooldown-text';
+
+        refreshBtn.style.position = 'relative';
+        refreshBtn.appendChild(ring);
+        refreshBtn.appendChild(text);
+
+        const circle = ring.querySelector('circle');
+        let remaining = seconds;
+
+        const tick = () => {
+            text.textContent = remaining;
+            // Animate ring: full → empty
+            const progress = remaining / seconds;
+            circle.style.strokeDashoffset = ((1 - progress) * circumference).toFixed(2);
+
+            if (remaining <= 0) {
+                clearInterval(refreshCooldownTimer);
+                refreshCooldownTimer = null;
+                refreshBtn.classList.remove('cooldown');
+                refreshBtn.title = 'Aggiorna stato';
+                ring.remove();
+                text.remove();
+                return;
+            }
+            remaining--;
+        };
+
+        tick(); // show immediately
+        refreshCooldownTimer = setInterval(tick, 1000);
+    }
 
     async function handleRefresh() {
-        if (isRefreshing) return;
+        if (isRefreshing || refreshCooldownTimer) return;
 
         // Check for unsaved changes — show confirmation tooltip
         const pendingChanges = DynamoService.getModifiedAppEnvs(DataManager.getSchedulesRef());
@@ -3173,6 +3221,8 @@ const App = (() => {
         } finally {
             isRefreshing = false;
             refreshBtn.classList.remove('spinning');
+            // 15-second cooldown to prevent spam
+            startRefreshCooldown(15);
         }
     }
 
