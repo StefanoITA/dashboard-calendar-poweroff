@@ -4133,9 +4133,9 @@ body:not(.is-admin) #exportBtn { display: none !important; }
 }
 
 /* ============================================
-   Blackout Periods Panel
+   Maintenance Windows Panel
    ============================================ */
-.blackout-overlay {
+.maint-overlay {
     position: fixed;
     inset: 0;
     background: rgba(0,0,0,0.5);
@@ -4145,152 +4145,121 @@ body:not(.is-admin) #exportBtn { display: none !important; }
     justify-content: center;
     animation: fadeIn 0.15s ease;
 }
-.blackout-panel {
+.maint-panel {
     background: var(--bg-primary);
     border: 1px solid var(--border-primary);
     border-radius: 12px;
-    width: 560px;
+    width: 600px;
     max-width: 95vw;
-    max-height: 80vh;
+    max-height: 85vh;
     overflow: auto;
     box-shadow: 0 12px 40px rgba(0,0,0,0.25);
 }
-.blackout-header {
+.maint-header {
     display: flex;
     align-items: center;
-    gap: 10px;
+    justify-content: space-between;
     padding: 16px 20px;
     border-bottom: 1px solid var(--border-primary);
 }
-.blackout-header h3 {
-    font-size: 1rem;
-    margin: 0;
+.maint-header h3 { font-size: 1rem; margin: 0; }
+.maint-subtitle { font-size: 0.78rem; color: var(--text-tertiary); margin-top: 2px; }
+.maint-close-btn {
+    width: 32px; height: 32px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 6px; border: 1px solid var(--border-primary);
+    background: var(--bg-secondary); color: var(--text-secondary);
+    cursor: pointer; transition: all 0.15s;
 }
-.blackout-subtitle {
-    font-size: 0.78rem;
-    color: var(--text-tertiary);
-    flex: 1;
-}
-.blackout-close {
-    background: none;
-    border: none;
-    font-size: 1.3rem;
-    cursor: pointer;
-    color: var(--text-tertiary);
-    border-radius: 4px;
-    padding: 2px 6px;
-}
-.blackout-close:hover { background: var(--bg-tertiary); }
-.blackout-info {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    padding: 12px 20px;
-    font-size: 0.76rem;
-    color: var(--text-secondary);
-    background: var(--bg-secondary);
+.maint-close-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); border-color: var(--text-tertiary); }
+.maint-info {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 12px 20px; font-size: 0.76rem;
+    color: var(--text-secondary); background: var(--bg-secondary);
     border-bottom: 1px solid var(--border-primary);
 }
-.blackout-info svg { flex-shrink: 0; margin-top: 1px; color: var(--accent); }
-.blackout-add-form {
-    padding: 14px 20px;
-    border-bottom: 1px solid var(--border-primary);
+.maint-info svg { flex-shrink: 0; margin-top: 1px; color: var(--accent); }
+.maint-add-form { padding: 16px 20px; border-bottom: 1px solid var(--border-primary); }
+.maint-form-row { display: flex; gap: 10px; align-items: flex-end; margin-bottom: 10px; }
+.maint-form-field { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.maint-form-field label {
+    font-size: 0.7rem; font-weight: 600; color: var(--text-tertiary);
+    text-transform: uppercase; letter-spacing: 0.04em;
 }
-.blackout-form-row {
-    display: flex;
-    gap: 8px;
-    align-items: flex-end;
+.maint-form-field input {
+    padding: 7px 10px; border: 1px solid var(--border-primary);
+    border-radius: 6px; background: var(--bg-primary);
+    color: var(--text-primary); font-size: 0.82rem;
 }
-.blackout-form-field {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
+.maint-form-field input:focus { border-color: var(--accent); outline: none; }
+.maint-add-btn {
+    width: 100%; justify-content: center;
+    padding: 8px 14px !important; font-size: 0.82rem !important;
 }
-.blackout-form-field label {
-    font-size: 0.7rem;
-    font-weight: 500;
-    color: var(--text-tertiary);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+.maint-list { padding: 12px 20px 16px; }
+.maint-empty {
+    text-align: center; padding: 24px; color: var(--text-tertiary); font-size: 0.82rem;
 }
-.blackout-form-field input {
-    padding: 6px 8px;
-    border: 1px solid var(--border-primary);
-    border-radius: 4px;
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    font-size: 0.8rem;
+.maint-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 14px; border: 1px solid var(--border-primary);
+    border-radius: 8px; margin-bottom: 8px; font-size: 0.82rem;
+    transition: border-color 0.15s;
 }
-.blackout-add-btn {
-    padding: 6px 14px !important;
-    font-size: 0.78rem !important;
-    white-space: nowrap;
+.maint-item.active { border-color: var(--accent); background: rgba(194,65,12,0.04); }
+.maint-item.past { opacity: 0.5; }
+.maint-item-body { flex: 1; min-width: 0; }
+.maint-item-dates { font-weight: 500; color: var(--text-primary); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.maint-item-sep { color: var(--text-tertiary); font-size: 0.9em; }
+.maint-item-reason { font-size: 0.75rem; color: var(--text-secondary); margin-top: 3px; }
+.maint-badge-active {
+    font-size: 0.62rem; padding: 2px 7px; border-radius: 4px;
+    background: var(--accent); color: white; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.05em;
 }
-.blackout-list {
-    padding: 10px 20px;
+.maint-badge-future {
+    font-size: 0.62rem; padding: 2px 7px; border-radius: 4px;
+    background: #3b82f6; color: white; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.05em;
 }
-.blackout-empty {
-    text-align: center;
-    padding: 20px;
-    color: var(--text-tertiary);
-    font-size: 0.82rem;
+.maint-badge-past {
+    font-size: 0.62rem; padding: 2px 7px; border-radius: 4px;
+    background: var(--bg-tertiary, #555); color: var(--text-tertiary); font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.05em;
 }
-.blackout-item {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    padding: 10px 12px;
-    border: 1px solid var(--border-primary);
-    border-radius: 6px;
-    margin-bottom: 6px;
-    font-size: 0.8rem;
+.maint-remove-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; flex-shrink: 0;
+    background: var(--bg-secondary); border: 1px solid var(--border-primary);
+    border-radius: 6px; cursor: pointer; color: var(--text-tertiary);
+    transition: all 0.15s;
 }
-.blackout-item.active {
-    border-color: var(--accent);
-    background: var(--accent-light, rgba(194,65,12,0.04));
-}
-.blackout-item-dates {
-    font-weight: 500;
-    color: var(--text-primary);
-    flex: 1;
-}
-.blackout-active-badge {
-    display: inline-block;
-    font-size: 0.65rem;
-    padding: 1px 6px;
-    border-radius: 3px;
-    background: var(--accent);
-    color: white;
-    font-weight: 700;
-    margin-left: 6px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-}
-.blackout-item-reason {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-    width: 100%;
-}
-.blackout-remove-btn {
-    background: none;
-    border: none;
-    font-size: 1.1rem;
-    cursor: pointer;
-    color: var(--text-tertiary);
-    padding: 2px 6px;
-    border-radius: 4px;
-}
-.blackout-remove-btn:hover { background: #ef444420; color: #ef4444; }
+.maint-remove-btn:hover { background: #ef444415; border-color: #ef4444; color: #ef4444; }
 
-/* Blackout button in controls row */
-.btn-blackout {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 0.78rem !important;
-    padding: 6px 12px !important;
+/* Maintenance button in controls row */
+.btn-maintenance {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 0.78rem !important; padding: 6px 12px !important;
+}
+
+/* Environment maintenance indicators */
+.env-maint-badge {
+    font-size: 0.62rem; padding: 2px 8px; border-radius: 4px;
+    background: var(--accent); color: white; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    margin-left: 8px; vertical-align: middle;
+    animation: pulse-maint 2s infinite;
+}
+@keyframes pulse-maint { 0%,100% { opacity: 1; } 50% { opacity: 0.7; } }
+.env-maint-count {
+    font-size: 0.72rem; color: var(--accent); font-weight: 500; margin-left: 6px;
+}
+
+/* Save dialog: maintenance change row */
+.save-hostname-row.maint-change {
+    background: rgba(194,65,12,0.04);
+    border-left: 3px solid var(--accent);
+    padding-left: 12px;
 }
 
 /* ============================================
@@ -4348,7 +4317,7 @@ body:not(.is-admin) #exportBtn { display: none !important; }
 :fullscreen .modal-overlay,
 :fullscreen .confirm-overlay,
 :fullscreen .user-edit-overlay,
-:fullscreen .blackout-overlay,
+:fullscreen .maint-overlay,
 :fullscreen .env-popover,
 :fullscreen .time-picker-dropdown,
 :fullscreen .refresh-confirm-tooltip,
@@ -4359,7 +4328,7 @@ body:not(.is-admin) #exportBtn { display: none !important; }
 :-webkit-full-screen .modal-overlay,
 :-webkit-full-screen .confirm-overlay,
 :-webkit-full-screen .user-edit-overlay,
-:-webkit-full-screen .blackout-overlay,
+:-webkit-full-screen .maint-overlay,
 :-webkit-full-screen .env-popover,
 :-webkit-full-screen .time-picker-dropdown,
 :-webkit-full-screen .refresh-confirm-tooltip,
