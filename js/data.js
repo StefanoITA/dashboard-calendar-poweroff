@@ -9,6 +9,17 @@ const DataManager = (() => {
     let currentUser = null;
     let notes = {};
     let systemMessages = [];
+    let blackoutPeriods = {};  // { "app|env": [{ id, startDate, endDate, reason }] }  or { "_global": [...] }
+    let scheduleExceptions = {}; // { entryId: [{ date, action: 'skip'|'override', startTime?, stopTime?, reason? }] }
+    const SCHEDULE_TEMPLATES = [
+        { id: 'standard_dev', name: 'Orario Standard Dev', type: 'window', startTime: '08:00', stopTime: '20:00', recurring: 'weekdays', description: 'Lun-Ven 08:00-20:00' },
+        { id: 'extended_dev', name: 'Orario Esteso Dev', type: 'window', startTime: '06:00', stopTime: '23:00', recurring: 'weekdays', description: 'Lun-Ven 06:00-23:00' },
+        { id: 'h24_weekdays', name: 'H24 Feriali', type: 'window', startTime: '00:00', stopTime: '23:59', recurring: 'weekdays', description: 'Lun-Ven H24' },
+        { id: 'minimal', name: 'Orario Minimo', type: 'window', startTime: '09:00', stopTime: '18:00', recurring: 'weekdays', description: 'Lun-Ven 09:00-18:00' },
+        { id: 'weekend_maintenance', name: 'Manutenzione Weekend', type: 'window', startTime: '06:00', stopTime: '22:00', recurring: 'weekends', description: 'Sab-Dom 06:00-22:00' },
+        { id: 'shutdown_weekend', name: 'Shutdown Weekend', type: 'shutdown', recurring: 'weekends', description: 'Spegni Sab-Dom' },
+        { id: 'batch_night', name: 'Batch Notturno', type: 'window', startTime: '22:00', stopTime: '23:59', recurring: 'weekdays', description: 'Lun-Ven 22:00-23:59 (batch)' },
+    ];
 
     function parseCSV(text) {
         const lines = text.trim().split('\n');
@@ -117,7 +128,11 @@ const DataManager = (() => {
         return currentUser && currentUser.role === 'Read-Only';
     }
 
+    // Production/Produzione environments are RO by default for non-Admin
+    const _PRODUCTION_ENVS = new Set(['Production', 'Produzione']);
+
     // Per-app permission: 'rw', 'ro', or null (no access)
+    // Supports per-env overrides: { "App1": { "_default": "rw", "Produzione": "ro" } }
     function getAppPermission(appName) {
         if (!currentUser) return null;
         if (currentUser.role === 'Admin') return 'rw';
@@ -125,7 +140,10 @@ const DataManager = (() => {
             const apps = currentUser.applications;
             if (Array.isArray(apps) && apps.includes('*')) return 'ro';
             if (typeof apps === 'object' && !Array.isArray(apps)) {
-                return apps[appName] ? 'ro' : null;
+                const val = apps[appName];
+                if (!val) return null;
+                if (typeof val === 'object') return val._default || 'ro';
+                return 'ro';
             }
             return 'ro';
         }
@@ -136,11 +154,44 @@ const DataManager = (() => {
             if (apps.includes('*')) return currentUser.role === 'Read-Only' ? 'ro' : 'rw';
             return apps.includes(appName) ? 'rw' : null;
         }
-        // Object format: { "App1": "rw", "App2": "ro" }
+        // Object format: { "App1": "rw", "App2": "ro", "App3": { "_default": "rw", "Produzione": "ro" } }
         if (typeof apps === 'object' && apps !== null) {
-            return apps[appName] || null;
+            const val = apps[appName];
+            if (!val) return null;
+            if (typeof val === 'object') return val._default || 'rw';
+            return val;
         }
         return null;
+    }
+
+    // Per-environment permission: checks env-level override, then app-level, then production default
+    function getEnvPermission(appName, envName) {
+        if (!currentUser) return null;
+        if (currentUser.role === 'Admin') return 'rw';
+
+        const appPerm = getAppPermission(appName);
+        if (!appPerm) return null;
+
+        // Check per-env override in applications object
+        const apps = currentUser.applications;
+        if (typeof apps === 'object' && !Array.isArray(apps)) {
+            const val = apps[appName];
+            if (typeof val === 'object' && val !== null) {
+                if (val[envName]) return val[envName];
+            }
+        }
+
+        // Production environments are RO by default for non-Admin
+        if (_PRODUCTION_ENVS.has(envName) && currentUser.role !== 'Admin') {
+            return 'ro';
+        }
+
+        return appPerm;
+    }
+
+    function isEnvReadOnly(appName, envName) {
+        const perm = getEnvPermission(appName, envName);
+        return perm === 'ro';
     }
 
     function canAccessApp(appName) {
@@ -386,6 +437,19 @@ const DataManager = (() => {
     function validateScheduleOverlap(appName, envName, hostname, newEntry, excludeEntryId) {
         if (newEntry.type !== 'window') return { valid: true };
 
+        // Custom entries: validate per-day
+        if (newEntry.recurring === 'custom' && newEntry.daySchedules) {
+            // For custom, validate each active day against existing schedules
+            const existing = getScheduleEntries(appName, envName, hostname);
+            for (const [dayNum, ds] of Object.entries(newEntry.daySchedules)) {
+                const newStart = _timeToMinutes(ds.startTime);
+                const newStop = _timeToMinutes(ds.stopTime);
+                if (newStart < 0 || newStop < 0) return { valid: false, reason: `Giorno ${dayNum}: orario non valido` };
+                if (newStart >= newStop) return { valid: false, reason: `Giorno ${dayNum}: orario di avvio dopo lo spegnimento` };
+            }
+            return { valid: true }; // Detailed per-day overlap check skipped for custom (too complex)
+        }
+
         const newStart = _timeToMinutes(newEntry.startTime);
         const newStop = _timeToMinutes(newEntry.stopTime);
         if (newStart < 0 || newStop < 0) return { valid: false, reason: 'Orario non valido' };
@@ -395,6 +459,9 @@ const DataManager = (() => {
         for (const entry of existing) {
             if (excludeEntryId && entry.id === excludeEntryId) continue;
             if (entry.type !== 'window') continue;
+
+            // Skip overlap check between custom and non-custom (handled at custom entry creation)
+            if (entry.recurring === 'custom') continue;
 
             const exStart = _timeToMinutes(entry.startTime);
             const exStop = _timeToMinutes(entry.stopTime);
@@ -417,6 +484,7 @@ const DataManager = (() => {
     /**
      * Controlla se due entry hanno pattern ricorrenti che si intersecano.
      * daily si interseca con tutto. weekdays e weekends non si intersecano tra loro.
+     * custom si interseca se condividono almeno un giorno della settimana.
      * one-time si intersecano solo se hanno almeno una data in comune.
      */
     function _recurringOverlaps(a, b) {
@@ -425,6 +493,13 @@ const DataManager = (() => {
 
         // daily si interseca con tutto
         if (ra === 'daily' || rb === 'daily') return true;
+
+        // custom: check day overlap
+        if (ra === 'custom' || rb === 'custom') {
+            const daysA = _getActiveDays(a);
+            const daysB = _getActiveDays(b);
+            return daysA.some(d => daysB.includes(d));
+        }
 
         // weekdays vs weekends non si intersecano
         if ((ra === 'weekdays' && rb === 'weekends') || (ra === 'weekends' && rb === 'weekdays')) return false;
@@ -447,6 +522,16 @@ const DataManager = (() => {
         }
 
         return false;
+    }
+
+    // Get active day-of-week numbers for an entry (1=Mon..7=Sun)
+    function _getActiveDays(entry) {
+        const rec = entry.recurring || 'none';
+        if (rec === 'daily') return [1,2,3,4,5,6,7];
+        if (rec === 'weekdays') return [1,2,3,4,5];
+        if (rec === 'weekends') return [6,7];
+        if (rec === 'custom' && entry.daySchedules) return Object.keys(entry.daySchedules).map(Number);
+        return [];
     }
 
     function _datesOverlapRecurring(dates, recurringType) {
@@ -477,20 +562,46 @@ const DataManager = (() => {
 
         for (const entry of existing) {
             if (entry.type !== 'window') continue;
-            const s = _timeToMinutes(entry.startTime);
-            const e = _timeToMinutes(entry.stopTime);
-            if (s < 0 || e < 0 || s >= e) continue;
 
             const rec = entry.recurring || 'none';
             let applies = false;
+            let startTime = entry.startTime;
+            let stopTime = entry.stopTime;
+
             if (rec === 'daily') applies = true;
             else if (rec === 'weekdays' && dow >= 1 && dow <= 5) applies = true;
             else if (rec === 'weekends' && (dow === 0 || dow === 6)) applies = true;
+            else if (rec === 'custom' && entry.daySchedules) {
+                const dayKey = String(dow === 0 ? 7 : dow); // Convert JS dow (0=Sun) to ISO (7=Sun)
+                const ds = entry.daySchedules[dayKey];
+                if (ds) {
+                    applies = true;
+                    startTime = ds.startTime;
+                    stopTime = ds.stopTime;
+                }
+            }
             else if (rec === 'none' && (entry.dates || []).includes(dateStr)) applies = true;
 
-            if (applies) {
-                windows.push({ startMin: s, stopMin: e, label: `${entry.startTime}-${entry.stopTime}` });
+            if (!applies) continue;
+
+            // Check blackout periods
+            if (_isDateBlackedOut(appName, envName, dateStr)) continue;
+
+            // Check exceptions
+            const exception = _getException(entry, dateStr);
+            if (exception) {
+                if (exception.action === 'skip') continue;
+                if (exception.action === 'override') {
+                    startTime = exception.startTime;
+                    stopTime = exception.stopTime;
+                }
             }
+
+            const s = _timeToMinutes(startTime);
+            const e = _timeToMinutes(stopTime);
+            if (s < 0 || e < 0 || s >= e) continue;
+
+            windows.push({ startMin: s, stopMin: e, label: `${startTime}-${stopTime}` });
         }
         return windows;
     }
@@ -622,6 +733,115 @@ const DataManager = (() => {
         saveSchedulesToStorage();
     }
 
+    // ============================================
+    // Blackout Periods (schedule suspension)
+    // ============================================
+    function _isDateBlackedOut(appName, envName, dateStr) {
+        const keys = [`${appName}|${envName}`, '_global'];
+        for (const key of keys) {
+            const periods = blackoutPeriods[key];
+            if (!periods) continue;
+            for (const p of periods) {
+                if (dateStr >= p.startDate && dateStr <= p.endDate) return true;
+            }
+        }
+        return false;
+    }
+
+    function addBlackoutPeriod(scope, startDate, endDate, reason) {
+        // scope: { app, env } or '_global'
+        const key = typeof scope === 'string' ? scope : `${scope.app}|${scope.env}`;
+        if (!blackoutPeriods[key]) blackoutPeriods[key] = [];
+        const period = { id: generateId(), startDate, endDate, reason: reason || '' };
+        blackoutPeriods[key].push(period);
+        _saveBlackoutsToStorage();
+        return period.id;
+    }
+
+    function removeBlackoutPeriod(scope, periodId) {
+        const key = typeof scope === 'string' ? scope : `${scope.app}|${scope.env}`;
+        if (!blackoutPeriods[key]) return;
+        blackoutPeriods[key] = blackoutPeriods[key].filter(p => p.id !== periodId);
+        if (blackoutPeriods[key].length === 0) delete blackoutPeriods[key];
+        _saveBlackoutsToStorage();
+    }
+
+    function getBlackoutPeriods(scope) {
+        const key = typeof scope === 'string' ? scope : `${scope.app}|${scope.env}`;
+        const specific = blackoutPeriods[key] || [];
+        const global = blackoutPeriods['_global'] || [];
+        return [...global, ...specific];
+    }
+
+    function getAllBlackoutPeriods() { return blackoutPeriods; }
+
+    function _saveBlackoutsToStorage() {
+        try { localStorage.setItem('shutdownScheduler_blackouts', JSON.stringify(blackoutPeriods)); }
+        catch (e) { console.warn('Could not save blackouts', e); }
+    }
+
+    function _loadBlackoutsFromStorage() {
+        try {
+            const saved = localStorage.getItem('shutdownScheduler_blackouts');
+            if (saved) blackoutPeriods = JSON.parse(saved);
+        } catch (e) { blackoutPeriods = {}; }
+    }
+
+    // ============================================
+    // Schedule Exceptions (per-entry overrides for specific dates)
+    // ============================================
+    function _getException(entry, dateStr) {
+        const excs = scheduleExceptions[entry.id];
+        if (!excs) return null;
+        return excs.find(ex => ex.date === dateStr) || null;
+    }
+
+    function addScheduleException(entryId, date, action, overrideData) {
+        // action: 'skip' (skip this date) or 'override' (different hours)
+        if (!scheduleExceptions[entryId]) scheduleExceptions[entryId] = [];
+        // Remove existing exception for same date
+        scheduleExceptions[entryId] = scheduleExceptions[entryId].filter(e => e.date !== date);
+        const exc = { date, action, ...(overrideData || {}) };
+        scheduleExceptions[entryId].push(exc);
+        _saveExceptionsToStorage();
+    }
+
+    function removeScheduleException(entryId, date) {
+        if (!scheduleExceptions[entryId]) return;
+        scheduleExceptions[entryId] = scheduleExceptions[entryId].filter(e => e.date !== date);
+        if (scheduleExceptions[entryId].length === 0) delete scheduleExceptions[entryId];
+        _saveExceptionsToStorage();
+    }
+
+    function getScheduleExceptions(entryId) {
+        return scheduleExceptions[entryId] || [];
+    }
+
+    function getAllExceptions() { return scheduleExceptions; }
+
+    function _saveExceptionsToStorage() {
+        try { localStorage.setItem('shutdownScheduler_exceptions', JSON.stringify(scheduleExceptions)); }
+        catch (e) { console.warn('Could not save exceptions', e); }
+    }
+
+    function _loadExceptionsFromStorage() {
+        try {
+            const saved = localStorage.getItem('shutdownScheduler_exceptions');
+            if (saved) scheduleExceptions = JSON.parse(saved);
+        } catch (e) { scheduleExceptions = {}; }
+    }
+
+    // ============================================
+    // Schedule Templates
+    // ============================================
+    function getScheduleTemplates() { return SCHEDULE_TEMPLATES; }
+
+    function applyTemplate(templateId) {
+        const tmpl = SCHEDULE_TEMPLATES.find(t => t.id === templateId);
+        if (!tmpl) return null;
+        return { ...tmpl, id: undefined };
+    }
+
     function saveSchedulesToStorage() {
         try { localStorage.setItem('shutdownScheduler_schedules', JSON.stringify(schedules)); }
         catch (e) { console.warn('Could not save to localStorage', e); }
@@ -654,6 +874,8 @@ const DataManager = (() => {
             const saved = localStorage.getItem('shutdownScheduler_notes');
             if (saved) notes = JSON.parse(saved);
         } catch (e) { notes = {}; }
+        _loadBlackoutsFromStorage();
+        _loadExceptionsFromStorage();
     }
 
     function saveNotesToStorage() {
@@ -800,6 +1022,9 @@ const DataManager = (() => {
     // ============================================
     // Cronjob Generation (per entry, per server)
     // ============================================
+    // Day number mapping: JS cron uses 0=Sun,1=Mon..6=Sat; our daySchedules uses 1=Mon..7=Sun
+    const _isoToCron = { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 0 }; // ISO day → cron day
+
     function generateCronjobs(entries) {
         if (!entries || entries.length === 0) return [];
         return entries.map(entry => {
@@ -828,6 +1053,27 @@ const DataManager = (() => {
                 } else {
                     cj.crons.push({ action: 'stop', expression: '0 0 * * 0,6' });
                 }
+            } else if (entry.recurring === 'custom' && entry.daySchedules) {
+                // Custom per-day scheduling: group days with identical times for compact cron
+                const timeGroups = {};
+                for (const [isoDay, ds] of Object.entries(entry.daySchedules)) {
+                    if (!ds || !ds.startTime || !ds.stopTime) continue;
+                    const timeKey = `${ds.startTime}|${ds.stopTime}`;
+                    if (!timeGroups[timeKey]) timeGroups[timeKey] = { startTime: ds.startTime, stopTime: ds.stopTime, days: [] };
+                    const cronDay = _isoToCron[Number(isoDay)];
+                    if (cronDay !== undefined) timeGroups[timeKey].days.push(cronDay);
+                }
+                for (const group of Object.values(timeGroups)) {
+                    const [sH, sM] = group.startTime.split(':').map(Number);
+                    const [eH, eM] = group.stopTime.split(':').map(Number);
+                    const dayStr = group.days.sort((a, b) => a - b).join(',');
+                    if (entry.type === 'window') {
+                        cj.crons.push({ action: 'start', expression: `${sM} ${sH} * * ${dayStr}` });
+                        cj.crons.push({ action: 'stop', expression: `${eM} ${eH} * * ${dayStr}` });
+                    } else {
+                        cj.crons.push({ action: 'stop', expression: `0 0 * * ${dayStr}` });
+                    }
+                }
             } else if (entry.dates && entry.dates.length > 0) {
                 // Group dates by month for compact cron
                 const byMonth = {};
@@ -854,6 +1100,7 @@ const DataManager = (() => {
     return {
         loadFromFile, loadFromPath, loadUsers, loadFromDynamo, loadMessages,
         getUsers, findUserByGitHub, setCurrentUser, getCurrentUser, isReadOnly, isAppReadOnly, getAppPermission,
+        getEnvPermission, isEnvReadOnly,
         canAccessApp, getAccessibleAppEnvPairs,
         getApplications, getEnvironments, getMachines,
         getScheduleEntries, addScheduleEntry, updateScheduleEntry, removeScheduleEntry,
@@ -866,6 +1113,12 @@ const DataManager = (() => {
         isGlobalReadOnly, canViewVMList, canViewEBSList, canViewCalculator,
         getVMListMachines, generateCronjobs,
         loadEBSVolumes, getEBSVolumes,
+        // Blackout periods
+        addBlackoutPeriod, removeBlackoutPeriod, getBlackoutPeriods, getAllBlackoutPeriods,
+        // Exceptions
+        addScheduleException, removeScheduleException, getScheduleExceptions, getAllExceptions,
+        // Templates
+        getScheduleTemplates, applyTemplate,
         get machines() { return machines; }
     };
 })();

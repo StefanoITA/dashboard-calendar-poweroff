@@ -286,7 +286,20 @@
                             <label class="recurring-option"><input type="radio" name="recurring" value="daily"><span class="recurring-label">Ogni giorno</span></label>
                             <label class="recurring-option"><input type="radio" name="recurring" value="weekdays"><span class="recurring-label">Luned&igrave; &mdash; Venerd&igrave;</span></label>
                             <label class="recurring-option"><input type="radio" name="recurring" value="weekends"><span class="recurring-label">Sabato &mdash; Domenica</span></label>
+                            <label class="recurring-option"><input type="radio" name="recurring" value="custom"><span class="recurring-label">Personalizzato per giorno</span></label>
                         </div>
+                    </div>
+
+                    <!-- Custom per-day schedule editor -->
+                    <div class="custom-day-editor" id="customDayEditor" style="display:none">
+                        <label style="font-size:0.76rem;font-weight:500;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;display:block;">Orari per giorno</label>
+                        <div class="custom-day-list" id="customDayList"></div>
+                    </div>
+
+                    <!-- Template quick-apply -->
+                    <div class="template-section" id="templateSection">
+                        <label style="font-size:0.76rem;font-weight:500;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.05em;">Template Rapidi</label>
+                        <div class="template-chips" id="templateChips"></div>
                     </div>
                 </div>
                 <div class="modal-body-right" id="modalBodyRight">

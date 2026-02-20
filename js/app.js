@@ -33,7 +33,7 @@ const App = (() => {
 
     const envClassMap = { 'Development':'dev','Integration':'int','Pre-Produzione':'preprod','Training':'training','Bugfixing':'bugfix','Produzione':'prod','Pre-Production':'preprod','Production':'prod' };
     const appColors = ['#c2410c','#7c3aed','#2563eb','#0891b2','#059669','#dc2626','#db2777','#4f46e5','#ca8a04'];
-    const recurringLabels = { 'none':'Giorni specifici','daily':'Ogni giorno','weekdays':'Lun-Ven','weekends':'Sab-Dom' };
+    const recurringLabels = { 'none':'Giorni specifici','daily':'Ogni giorno','weekdays':'Lun-Ven','weekends':'Sab-Dom','custom':'Personalizzato' };
     const envColors = { 'Development':'#2563eb','Integration':'#7c3aed','Bugfixing':'#dc2626','Training':'#0891b2','Pre-Produzione':'#d97706','Produzione':'#059669','Pre-Production':'#d97706','Production':'#059669' };
 
     const SVG = {
@@ -63,8 +63,24 @@ const App = (() => {
     };
 
     // Debug logging (set DEBUG = true solo in sviluppo)
-    const DEBUG = false;
-    const log = (...args) => DEBUG && console.log(...args);
+    const DEBUG = true;
+    const LOG_LEVELS = { ERROR: 0, WARN: 1, INFO: 2, DEBUG: 3 };
+    const LOG_LEVEL = LOG_LEVELS.INFO;
+    const _log = (level, module, message, data = null) => {
+        if (LOG_LEVELS[level] > LOG_LEVEL) return;
+        const timestamp = new Date().toISOString().substr(11, 12);
+        const prefix = `[${timestamp}][${level}][${module}]`;
+        const style = level === 'ERROR' ? 'color:#ef4444;font-weight:bold'
+                    : level === 'WARN' ? 'color:#f59e0b;font-weight:bold'
+                    : level === 'INFO' ? 'color:#3b82f6'
+                    : 'color:#6b7280';
+        if (data) {
+            console.log(`%c${prefix} ${message}`, style, data);
+        } else {
+            console.log(`%c${prefix} ${message}`, style);
+        }
+    };
+    const log = (...args) => _log('DEBUG', 'App', args.join(' '));
 
     // ============================================
     // SSO Configuration (GitHub Enterprise OAuth)
@@ -97,6 +113,7 @@ const App = (() => {
             if (!resp.ok) return null;
             return await resp.json();
         } catch (err) {
+            _log('ERROR', 'Auth', 'Token verify failed', { error: err.message });
             console.error('[SSO] Token verify failed:', err.message);
             return null;
         }
@@ -165,6 +182,8 @@ const App = (() => {
                     </div>
                 </div>`;
             document.body.appendChild(overlay);
+            const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+            if (fsEl) fsEl.appendChild(overlay);
 
             const close = (result) => { overlay.remove(); resolve(result); };
             overlay.querySelector('.confirm-cancel').addEventListener('click', () => close(false));
@@ -329,6 +348,7 @@ const App = (() => {
     // Init
     // ============================================
     async function init() {
+        _log('INFO', 'Init', 'Avvio applicazione...');
         initTheme();
 
         // ============================================
@@ -403,6 +423,7 @@ const App = (() => {
                 DataManager.setCurrentUser(ssoUser.id);
                 localStorage.setItem('shutdownScheduler_userId', ssoUser.id);
                 log('[SSO] User matched:', ssoUser.name, '(' + ssoUser.role + ')');
+                _log('INFO', 'Auth', 'Login SSO completato', { user: ghUsername });
             } else {
                 clearSSOSession();
                 showUnauthorizedScreen(ghUsername);
@@ -439,6 +460,7 @@ const App = (() => {
                 await DataManager.loadFromDynamo();
                 updateDynamoStatus('online');
             } catch (err) {
+                _log('ERROR', 'Init', 'DynamoDB connection failed', { error: err.message });
                 updateDynamoStatus('offline');
                 showConnectionError();
                 return;
@@ -537,7 +559,8 @@ const App = (() => {
                 $$('.schedule-type-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 currentScheduleType = btn.dataset.type;
-                $('#timeWindowConfig').style.display = currentScheduleType === 'window' ? 'block' : 'none';
+                $('#timeWindowConfig').style.display = currentScheduleType === 'window' && currentRecurring !== 'custom' ? 'block' : 'none';
+                _updateCustomDayVisibility();
             });
         });
 
@@ -545,6 +568,7 @@ const App = (() => {
             radio.addEventListener('change', () => {
                 currentRecurring = radio.value;
                 updateCalendarVisibility();
+                _updateCustomDayVisibility();
             });
         });
 
@@ -744,6 +768,12 @@ const App = (() => {
             const section = createCalendarSection();
             right.appendChild(section);
             renderCalendar();
+        } else if (currentRecurring === 'custom') {
+            right.innerHTML = `<div class="calendar-hint">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                <div class="hint-text">Schedulazione Personalizzata</div>
+                <div class="hint-sub">Configura orari diversi per ogni giorno della settimana nel pannello a sinistra</div>
+            </div>`;
         } else {
             const label = recurringLabels[currentRecurring];
             right.innerHTML = `<div class="calendar-hint">
@@ -861,6 +891,7 @@ const App = (() => {
     }
 
     function selectApp(appName, itemEl) {
+        _log('INFO', 'Nav', 'Selezione applicazione', { app: appName });
         currentApp = appName;
         currentEnv = null;
         $$('#appList .nav-item').forEach(i => i.classList.toggle('active', i.dataset.app === appName));
@@ -902,6 +933,7 @@ const App = (() => {
     function closeEnvPopover() { $('#envPopover').style.display = 'none'; }
 
     function selectEnv(envName) {
+        _log('INFO', 'Nav', 'Selezione ambiente', { app: currentApp, env: envName });
         currentEnv = envName;
         closeEnvPopover();
         updateBreadcrumb(currentApp, envName);
@@ -968,25 +1000,72 @@ const App = (() => {
         // Two-column layout: Apps (left) + Activity (right)
         html += '<div class="home-columns">';
 
-        // Left column — Applications
+        // Left column — Operational Overview
         html += '<div class="home-col-left">';
-        html += '<div class="home-section-title">Applicazioni</div>';
-        html += '<div class="home-app-list">';
-        apps.forEach((app, i) => {
-            const color = appColors[i % appColors.length];
-            const perm = DataManager.getAppPermission(app.name);
-            const permLabel = user && user.role === 'Admin' ? 'Admin' : perm === 'rw' ? 'Application Owner' : 'Sola Lettura';
-            const permCls = perm === 'rw' ? 'perm-rw' : 'perm-ro';
 
-            html += `<div class="home-app-row" data-app="${app.name}">
-                <div class="home-app-row-dot" style="background:${color}"></div>
-                <span class="home-app-row-name">${app.name}</span>
-                <span class="home-app-row-count">${app.machineCount} server</span>
-                <span class="home-app-row-perm ${permCls}">${permLabel}</span>
-                <svg class="home-app-row-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-            </div>`;
-        });
+        // Stats
+        const stats = DataManager.getStats();
+        const upcoming = DataManager.getUpcomingSchedules(7);
+        const recurringCount = upcoming.filter(u => u.recurring).length;
+        const oneTimeCount = upcoming.filter(u => !u.recurring).length;
+
+        html += '<div class="home-section-title">Panoramica Operativa</div>';
+        html += '<div class="home-stats-grid">';
+        html += `<div class="home-stat-card"><div class="home-stat-value">${stats.scheduledMachines}</div><div class="home-stat-label">VM Pianificate</div></div>`;
+        html += `<div class="home-stat-card"><div class="home-stat-value">${stats.totalSchedules}</div><div class="home-stat-label">Schedulazioni Attive</div></div>`;
+        html += `<div class="home-stat-card"><div class="home-stat-value">${recurringCount}</div><div class="home-stat-label">Ricorrenti</div></div>`;
+        html += `<div class="home-stat-card"><div class="home-stat-value">${oneTimeCount}</div><div class="home-stat-label">Una Tantum (7gg)</div></div>`;
         html += '</div>';
+
+        // Upcoming actions
+        html += '<div class="home-section-title" style="margin-top:20px;">Prossime Azioni (7 giorni)</div>';
+        if (upcoming.length === 0) {
+            html += '<div class="home-empty">Nessuna schedulazione attiva nei prossimi 7 giorni</div>';
+        } else {
+            html += '<div class="home-upcoming-list">';
+            const upcomingDisplay = upcoming.slice(0, 8);
+            upcomingDisplay.forEach(u => {
+                const isRecurring = u.recurring;
+                const schedLabel = u.entry.type === 'shutdown' ? 'Shutdown' : `${u.entry.startTime || '?'} — ${u.entry.stopTime || '?'}`;
+                const recLabel = isRecurring ? (recurringLabels[u.entry.recurring] || u.entry.recurring) : (u.dates ? u.dates.slice(0, 2).join(', ') : '');
+                const envCls = envClassMap[u.env] || 'dev';
+                html += `<div class="home-upcoming-item">
+                    <div class="home-upcoming-indicator ${u.entry.type === 'shutdown' ? 'shutdown' : 'window'}"></div>
+                    <div class="home-upcoming-info">
+                        <div class="home-upcoming-main">${u.app} <span class="home-upcoming-sep">/</span> ${u.env}</div>
+                        <div class="home-upcoming-detail"><code>${u.hostname}</code> — ${schedLabel}</div>
+                    </div>
+                    <div class="home-upcoming-badge">${recLabel}</div>
+                </div>`;
+            });
+            if (upcoming.length > 8) {
+                html += `<div class="home-upcoming-more">+ ${upcoming.length - 8} altre schedulazioni</div>`;
+            }
+            html += '</div>';
+        }
+
+        // Coverage by environment
+        const envCoverage = {};
+        DataManager.getAllSchedulesFlat().forEach(s => {
+            const key = `${s.app}|${s.env}`;
+            if (!envCoverage[key]) envCoverage[key] = { app: s.app, env: s.env, count: 0 };
+            envCoverage[key].count++;
+        });
+        const coverageList = Object.values(envCoverage).sort((a, b) => b.count - a.count).slice(0, 6);
+        if (coverageList.length > 0) {
+            html += '<div class="home-section-title" style="margin-top:20px;">Copertura Ambienti</div>';
+            html += '<div class="home-coverage-list">';
+            coverageList.forEach(c => {
+                const envColor = envColors[c.env] || '#7a7a96';
+                html += `<div class="home-coverage-item">
+                    <span class="home-coverage-dot" style="background:${envColor}"></span>
+                    <span class="home-coverage-name">${c.app} / ${c.env}</span>
+                    <span class="home-coverage-count">${c.count} sched.</span>
+                </div>`;
+            });
+            html += '</div>';
+        }
+
         html += '</div>';
 
         // Right column — Recent Activity
@@ -1009,18 +1088,6 @@ const App = (() => {
         html += '</div>'; // close home-columns
 
         screen.innerHTML = html;
-
-        // Bind app rows — click sidebar item to show env popover
-        screen.querySelectorAll('.home-app-row').forEach(row => {
-            row.addEventListener('click', () => {
-                const appName = row.dataset.app;
-                const item = document.querySelector(`#appList .nav-item[data-app="${appName}"]`);
-                if (item) {
-                    item.click();
-                    item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-                }
-            });
-        });
     }
 
     // ============================================
@@ -1029,7 +1096,7 @@ const App = (() => {
     function renderMachines(appName, envName) {
         const machines = DataManager.getMachines(appName, envName);
         const grid = $('#machineGrid');
-        const readOnly = DataManager.isReadOnly() || DataManager.isAppReadOnly(appName);
+        const readOnly = DataManager.isReadOnly() || DataManager.isAppReadOnly(appName) || DataManager.isEnvReadOnly(appName, envName);
         const stats = DataManager.getEnvScheduleStats(appName, envName);
         const hasSchedules = stats.scheduled > 0;
 
@@ -1051,7 +1118,11 @@ const App = (() => {
             ${!readOnly ? `<button class="btn-accent-highlight" id="planEnvBtn">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                 Pianifica Ambiente
-            </button>` : ''}`;
+            </button>` : ''}
+            <button class="btn-secondary btn-blackout" id="blackoutBtn" title="Gestisci periodi di blackout">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="9" y1="16" x2="15" y2="16"/></svg>
+                Blackout
+            </button>`;
 
         // Remove old search bar if exists
         const oldSearchBar = document.querySelector('.machine-search-bar:not(.machine-controls-row .machine-search-bar)');
@@ -1063,6 +1134,9 @@ const App = (() => {
 
         const planBtn = controlsRow.querySelector('#planEnvBtn');
         if (planBtn) planBtn.addEventListener('click', () => openModal('environment'));
+
+        const blackoutBtn = controlsRow.querySelector('#blackoutBtn');
+        if (blackoutBtn) blackoutBtn.addEventListener('click', () => openBlackoutPanel(appName, envName));
 
         // Hide the original applyAllBtn
         const origBtn = $('#applyAllBtn');
@@ -1078,8 +1152,11 @@ const App = (() => {
             envGroupsContainer.innerHTML = `<div class="env-groups-title">Schedulazioni Ambiente</div>` +
                 envGroups.map(g => {
                     const e = g.entry;
-                    const typeLabel = e.type === 'shutdown' ? 'Shutdown Completo' : `${e.startTime} \u2014 ${e.stopTime}`;
-                    const recLabel = e.recurring && e.recurring !== 'none' ? recurringLabels[e.recurring] : e.dates && e.dates.length > 0 ? `${e.dates.length} giorni specifici` : '';
+                    let typeLabel;
+                    if (e.type === 'shutdown') typeLabel = 'Shutdown Completo';
+                    else if (e.recurring === 'custom' && e.daySchedules) typeLabel = `Personalizzato (${Object.keys(e.daySchedules).length} gg)`;
+                    else typeLabel = `${e.startTime} \u2014 ${e.stopTime}`;
+                    const recLabel = e.recurring && e.recurring !== 'none' ? (recurringLabels[e.recurring] || e.recurring) : e.dates && e.dates.length > 0 ? `${e.dates.length} giorni specifici` : '';
                     const excluded = g.totalMachines - g.hostnames.length;
                     return `<div class="env-group-card" data-group-id="${g.groupId}">
                         <div class="env-group-info">
@@ -1241,6 +1318,9 @@ const App = (() => {
                             <button class="copy-btn" data-hostname="${m.hostname}" title="Copia hostname">${SVG.copy}</button>
                         </div>
                     </div>
+                    <button class="btn-vm-refresh" data-hostname="${m.hostname}" title="Aggiorna stato VM">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                    </button>
                 </div>
                 <div class="machine-card-body" data-server-type="${m.server_type}" data-description="${desc}">
                     <div class="entries-list">${renderEntriesList(entries, m.hostname, readOnly)}</div>
@@ -1327,6 +1407,27 @@ const App = (() => {
                 showToast('Nota eliminata', 'info');
             }));
 
+            const vmRefreshBtn = card.querySelector('.btn-vm-refresh');
+            if (vmRefreshBtn) {
+                vmRefreshBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const btn = e.currentTarget;
+                    if (btn.classList.contains('vm-refresh-cooldown')) return;
+                    btn.classList.add('spinning');
+                    // Re-render just this card
+                    setTimeout(() => {
+                        const parent = card.parentNode;
+                        const newCard = document.createElement('div');
+                        // Re-render this machine card in-place
+                        renderMachineCard(m, appName, envName, readOnly, { appendChild: (c) => { parent.replaceChild(c, card); } });
+                        btn.classList.remove('spinning');
+                        btn.classList.add('vm-refresh-cooldown');
+                        setTimeout(() => btn.classList.remove('vm-refresh-cooldown'), 5000);
+                        showToast(`${m.machine_name} aggiornato`, 'success');
+                    }, 300);
+                });
+            }
+
             grid.appendChild(card);
     }
 
@@ -1344,10 +1445,24 @@ const App = (() => {
                 Nessuna pianificazione</div></div>`;
         }
         return entries.map(entry => {
-            const typeLabel = entry.type === 'shutdown' ? 'Shutdown Completo' : `${entry.startTime} \u2014 ${entry.stopTime}`;
+            let typeLabel;
+            if (entry.type === 'shutdown') {
+                typeLabel = 'Shutdown Completo';
+            } else if (entry.recurring === 'custom' && entry.daySchedules) {
+                const days = Object.keys(entry.daySchedules);
+                typeLabel = `Personalizzato (${days.length} giorni)`;
+            } else {
+                typeLabel = `${entry.startTime} \u2014 ${entry.stopTime}`;
+            }
             const recurring = entry.recurring && entry.recurring !== 'none';
             let detailHtml = '';
-            if (recurring) {
+            if (entry.recurring === 'custom' && entry.daySchedules) {
+                const dayLines = Object.entries(entry.daySchedules).map(([d, ds]) => {
+                    const dayName = ['','Lun','Mar','Mer','Gio','Ven','Sab','Dom'][Number(d)] || d;
+                    return `<span class="custom-day-badge">${dayName} ${ds.startTime}-${ds.stopTime}</span>`;
+                }).join(' ');
+                detailHtml = `<div class="schedule-info">${dayLines}</div>`;
+            } else if (recurring) {
                 detailHtml = `<div class="schedule-info">Ricorrente: <strong>${recurringLabels[entry.recurring]}</strong></div>`;
             } else if (entry.dates && entry.dates.length > 0) {
                 const parts = formatDatesDetail(entry.dates);
@@ -1356,7 +1471,7 @@ const App = (() => {
             }
 
             const envTag = entry.envGroupId ? '<span class="entry-env-tag">Ambiente</span>' : '';
-            const excludeBtn = (!readOnly && entry.envGroupId) ? `<button class="btn-entry-action exclude-env-btn" data-group-id="${entry.envGroupId}" data-hostname="${hostname}" title="Escludi da schedulazione ambiente"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg></button>` : '';
+            const excludeBtn = (!readOnly && entry.envGroupId) ? `<button class="btn-entry-action exclude-env-btn" data-group-id="${entry.envGroupId}" data-hostname="${hostname}" title="Rimuovi dalla schedulazione ambiente"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg></button>` : '';
             const actionsHtml = readOnly ? '' : `
                 <div class="schedule-entry-actions">
                     ${excludeBtn}
@@ -1486,6 +1601,8 @@ const App = (() => {
     function openModal(type, hostname, entryId, envGroup) {
         if (DataManager.isReadOnly()) return;
         if (currentApp && DataManager.isAppReadOnly(currentApp)) return;
+        if (currentApp && currentEnv && DataManager.isEnvReadOnly(currentApp, currentEnv)) return;
+        _log('INFO', 'Modal', 'Apertura modale', { type, hostname });
         modalTarget = { type, app: currentApp, env: currentEnv, hostname: hostname || null };
         editingEntryId = entryId || null;
 
@@ -1514,6 +1631,11 @@ const App = (() => {
         calendarDate = new Date();
         updateCalendarVisibility();
         $('#scheduleModal').style.display = 'flex';
+        // Fullscreen fix: ensure modal is a child of the fullscreen element
+        const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+        if (fsEl && !fsEl.contains($('#scheduleModal'))) {
+            fsEl.appendChild($('#scheduleModal'));
+        }
         document.body.style.overflow = 'hidden';
     }
 
@@ -1525,17 +1647,121 @@ const App = (() => {
         selectedDates.clear();
     }
 
+    // ============================================
+    // Blackout Periods Panel
+    // ============================================
+    function openBlackoutPanel(appName, envName) {
+        _log('INFO', 'Blackout', 'Apertura pannello blackout', { app: appName, env: envName });
+        const existing = document.querySelector('.blackout-overlay');
+        if (existing) existing.remove();
+
+        const periods = DataManager.getBlackoutPeriods({ app: appName, env: envName });
+        const scope = { app: appName, env: envName };
+
+        const overlay = document.createElement('div');
+        overlay.className = 'blackout-overlay';
+        overlay.innerHTML = `
+            <div class="blackout-panel">
+                <div class="blackout-header">
+                    <h3>Periodi di Blackout</h3>
+                    <span class="blackout-subtitle">${appName} / ${envName}</span>
+                    <button class="btn-icon blackout-close">&times;</button>
+                </div>
+                <div class="blackout-info">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    <span>Durante i periodi di blackout, tutte le schedulazioni dell'ambiente vengono sospese. Utile per manutenzioni, release freeze o festivit\u00e0.</span>
+                </div>
+                <div class="blackout-add-form">
+                    <div class="blackout-form-row">
+                        <div class="blackout-form-field">
+                            <label>Data inizio</label>
+                            <input type="date" id="blkStartDate" value="${new Date().toISOString().split('T')[0]}">
+                        </div>
+                        <div class="blackout-form-field">
+                            <label>Data fine</label>
+                            <input type="date" id="blkEndDate" value="${new Date().toISOString().split('T')[0]}">
+                        </div>
+                        <div class="blackout-form-field" style="flex:2">
+                            <label>Motivo</label>
+                            <input type="text" id="blkReason" placeholder="es. Release freeze, manutenzione..." maxlength="200">
+                        </div>
+                        <button class="btn-primary blackout-add-btn" id="blkAddBtn">Aggiungi</button>
+                    </div>
+                </div>
+                <div class="blackout-list" id="blkList"></div>
+            </div>`;
+        document.body.appendChild(overlay);
+
+        const renderList = () => {
+            const list = overlay.querySelector('#blkList');
+            const currentPeriods = DataManager.getBlackoutPeriods(scope);
+            if (currentPeriods.length === 0) {
+                list.innerHTML = '<div class="blackout-empty">Nessun periodo di blackout attivo</div>';
+                return;
+            }
+            list.innerHTML = currentPeriods.map(p => {
+                const isActive = new Date().toISOString().split('T')[0] >= p.startDate && new Date().toISOString().split('T')[0] <= p.endDate;
+                return `<div class="blackout-item ${isActive ? 'active' : ''}">
+                    <div class="blackout-item-dates">
+                        <strong>${p.startDate}</strong> \u2014 <strong>${p.endDate}</strong>
+                        ${isActive ? '<span class="blackout-active-badge">ATTIVO</span>' : ''}
+                    </div>
+                    <div class="blackout-item-reason">${p.reason || 'Nessun motivo specificato'}</div>
+                    <button class="blackout-remove-btn" data-id="${p.id}" title="Rimuovi">&times;</button>
+                </div>`;
+            }).join('');
+            list.querySelectorAll('.blackout-remove-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    DataManager.removeBlackoutPeriod(scope, btn.dataset.id);
+                    AuditLog.log('Rimosso blackout', `${appName}/${envName} - ID: ${btn.dataset.id}`);
+                    showToast('Periodo di blackout rimosso', 'success');
+                    renderList();
+                });
+            });
+        };
+
+        renderList();
+
+        overlay.querySelector('#blkAddBtn').addEventListener('click', () => {
+            const start = overlay.querySelector('#blkStartDate').value;
+            const end = overlay.querySelector('#blkEndDate').value;
+            const reason = overlay.querySelector('#blkReason').value.trim();
+            if (!start || !end) { showToast('Inserisci date valide', 'error'); return; }
+            if (start > end) { showToast('La data di inizio deve essere prima della data di fine', 'error'); return; }
+            DataManager.addBlackoutPeriod(scope, start, end, reason);
+            AuditLog.log('Aggiunto blackout', `${appName}/${envName}: ${start} - ${end} (${reason})`);
+            showToast('Periodo di blackout aggiunto', 'success');
+            overlay.querySelector('#blkReason').value = '';
+            renderList();
+        });
+
+        overlay.querySelector('.blackout-close').addEventListener('click', () => overlay.remove());
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    }
+
+    // Custom per-day schedule state
+    let customDaySchedules = {}; // { "1": { startTime, stopTime, enabled }, ... }
+
     function loadEntryIntoModal(entry) {
         if (entry) {
             currentScheduleType = entry.type;
             currentRecurring = entry.recurring || 'none';
             $$('.schedule-type-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.type === entry.type));
-            $('#timeWindowConfig').style.display = entry.type === 'window' ? 'block' : 'none';
+            $('#timeWindowConfig').style.display = entry.type === 'window' && entry.recurring !== 'custom' ? 'block' : 'none';
             if (entry.startTime) setTimePickerValue('startTimePicker', entry.startTime);
             if (entry.stopTime) setTimePickerValue('stopTimePicker', entry.stopTime);
             $$('input[name="recurring"]').forEach(r => { r.checked = r.value === currentRecurring; });
             selectedDates.clear();
             if (entry.dates) entry.dates.forEach(d => selectedDates.add(d));
+            // Load custom day schedules
+            if (entry.recurring === 'custom' && entry.daySchedules) {
+                customDaySchedules = {};
+                for (const [day, ds] of Object.entries(entry.daySchedules)) {
+                    customDaySchedules[day] = { ...ds, enabled: true };
+                }
+            } else {
+                _initCustomDayDefaults();
+            }
         } else {
             currentScheduleType = 'window';
             currentRecurring = 'none';
@@ -1545,20 +1771,131 @@ const App = (() => {
             setTimePickerValue('stopTimePicker', '20:00');
             $$('input[name="recurring"]').forEach(r => { r.checked = r.value === 'none'; });
             selectedDates.clear();
+            _initCustomDayDefaults();
+        }
+        _renderCustomDayEditor();
+        _renderTemplateChips();
+        _updateCustomDayVisibility();
+    }
+
+    const _dayNames = ['', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato', 'Domenica'];
+    const _dayNamesShort = ['', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'];
+
+    function _initCustomDayDefaults() {
+        customDaySchedules = {};
+        for (let d = 1; d <= 7; d++) {
+            customDaySchedules[d] = { startTime: '08:00', stopTime: '20:00', enabled: d <= 5 };
         }
     }
 
+    function _updateCustomDayVisibility() {
+        const editor = document.getElementById('customDayEditor');
+        const timeConfig = document.getElementById('timeWindowConfig');
+        if (!editor) return;
+        if (currentRecurring === 'custom') {
+            editor.style.display = 'block';
+            if (timeConfig) timeConfig.style.display = 'none';
+        } else {
+            editor.style.display = 'none';
+            if (timeConfig && currentScheduleType === 'window') timeConfig.style.display = 'block';
+        }
+    }
+
+    function _renderCustomDayEditor() {
+        const list = document.getElementById('customDayList');
+        if (!list) return;
+        list.innerHTML = '';
+        for (let d = 1; d <= 7; d++) {
+            const ds = customDaySchedules[d] || { startTime: '08:00', stopTime: '20:00', enabled: false };
+            const row = document.createElement('div');
+            row.className = 'custom-day-row' + (ds.enabled ? ' active' : '');
+            row.innerHTML = `
+                <label class="custom-day-toggle">
+                    <input type="checkbox" ${ds.enabled ? 'checked' : ''} data-day="${d}">
+                    <span class="custom-day-name">${_dayNamesShort[d]}</span>
+                </label>
+                <div class="custom-day-times ${ds.enabled ? '' : 'disabled'}">
+                    <input type="time" class="custom-day-start" value="${ds.startTime}" data-day="${d}" ${ds.enabled ? '' : 'disabled'}>
+                    <span class="custom-day-sep">—</span>
+                    <input type="time" class="custom-day-stop" value="${ds.stopTime}" data-day="${d}" ${ds.enabled ? '' : 'disabled'}>
+                </div>`;
+            list.appendChild(row);
+
+            // Toggle day
+            row.querySelector('input[type="checkbox"]').addEventListener('change', (e) => {
+                const day = e.target.dataset.day;
+                customDaySchedules[day].enabled = e.target.checked;
+                _renderCustomDayEditor();
+            });
+            // Time changes
+            row.querySelector('.custom-day-start').addEventListener('change', (e) => {
+                customDaySchedules[e.target.dataset.day].startTime = e.target.value;
+            });
+            row.querySelector('.custom-day-stop').addEventListener('change', (e) => {
+                customDaySchedules[e.target.dataset.day].stopTime = e.target.value;
+            });
+        }
+    }
+
+    function _renderTemplateChips() {
+        const container = document.getElementById('templateChips');
+        if (!container) return;
+        const templates = DataManager.getScheduleTemplates();
+        container.innerHTML = templates.map(t => {
+            return `<button class="template-chip" data-tmpl="${t.id}" title="${t.description}">
+                <span class="template-chip-name">${t.name}</span>
+            </button>`;
+        }).join('');
+        container.querySelectorAll('.template-chip').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const tmpl = DataManager.applyTemplate(btn.dataset.tmpl);
+                if (!tmpl) return;
+                _log('INFO', 'Template', 'Applicazione template', { template: tmpl.name });
+                currentScheduleType = tmpl.type;
+                currentRecurring = tmpl.recurring || 'none';
+                $$('.schedule-type-btn').forEach(b => b.classList.toggle('active', b.dataset.type === tmpl.type));
+                $$('input[name="recurring"]').forEach(r => { r.checked = r.value === currentRecurring; });
+                if (tmpl.startTime) setTimePickerValue('startTimePicker', tmpl.startTime);
+                if (tmpl.stopTime) setTimePickerValue('stopTimePicker', tmpl.stopTime);
+                $('#timeWindowConfig').style.display = tmpl.type === 'window' && tmpl.recurring !== 'custom' ? 'block' : 'none';
+                updateCalendarVisibility();
+                _updateCustomDayVisibility();
+                showToast(`Template "${tmpl.name}" applicato`, 'info');
+            });
+        });
+    }
+
     function saveSchedule() {
+        _log('INFO', 'Schedule', 'Salvataggio pianificazione', { type: currentScheduleType, target: modalTarget });
         if (currentRecurring === 'none' && selectedDates.size === 0) {
             showToast('Seleziona almeno un giorno o una ricorrenza', 'error');
             return;
         }
 
-        const startTime = currentScheduleType === 'window' ? getTimePickerValue('startTimePicker') : null;
-        const stopTime = currentScheduleType === 'window' ? getTimePickerValue('stopTimePicker') : null;
+        // Custom per-day validation
+        if (currentRecurring === 'custom') {
+            const enabledDays = Object.entries(customDaySchedules).filter(([, ds]) => ds.enabled);
+            if (enabledDays.length === 0) {
+                showToast('Seleziona almeno un giorno nella schedulazione personalizzata', 'error');
+                return;
+            }
+            if (currentScheduleType === 'window') {
+                for (const [dayNum, ds] of enabledDays) {
+                    const [sh, sm] = ds.startTime.split(':').map(Number);
+                    const [eh, em] = ds.stopTime.split(':').map(Number);
+                    if (sh * 60 + sm >= eh * 60 + em) {
+                        showToast(`${_dayNames[dayNum]}: l'orario di avvio deve essere prima dello spegnimento`, 'error');
+                        return;
+                    }
+                }
+            }
+        }
 
-        // Validazione: startTime deve essere prima di stopTime
-        if (currentScheduleType === 'window') {
+        const startTime = currentScheduleType === 'window' && currentRecurring !== 'custom' ? getTimePickerValue('startTimePicker') : null;
+        const stopTime = currentScheduleType === 'window' && currentRecurring !== 'custom' ? getTimePickerValue('stopTimePicker') : null;
+
+        // Validazione: startTime deve essere prima di stopTime (non custom)
+        if (currentScheduleType === 'window' && currentRecurring !== 'custom') {
             const [sh, sm] = startTime.split(':').map(Number);
             const [eh, em] = stopTime.split(':').map(Number);
             if (sh * 60 + sm >= eh * 60 + em) {
@@ -1567,12 +1904,24 @@ const App = (() => {
             }
         }
 
+        // Build day schedules for custom recurring
+        let daySchedules = undefined;
+        if (currentRecurring === 'custom') {
+            daySchedules = {};
+            for (const [dayNum, ds] of Object.entries(customDaySchedules)) {
+                if (ds.enabled) {
+                    daySchedules[dayNum] = { startTime: ds.startTime, stopTime: ds.stopTime };
+                }
+            }
+        }
+
         const entry = {
             type: currentScheduleType,
             startTime,
             stopTime,
             recurring: currentRecurring,
-            dates: currentRecurring === 'none' ? Array.from(selectedDates).sort() : []
+            dates: currentRecurring === 'none' ? Array.from(selectedDates).sort() : [],
+            ...(daySchedules ? { daySchedules } : {})
         };
 
         // Validazione sovrapposizione per macchina singola
@@ -1938,6 +2287,97 @@ const App = (() => {
 
         grid.innerHTML = '';
         grid.appendChild(fragment);
+
+        // Make tags clickable — show VM detail popup
+        grid.querySelectorAll('.gc-tag').forEach(tag => {
+            tag.style.cursor = 'pointer';
+            tag.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const cell = tag.closest('.gc-day');
+                const dateStr = null; // we need to get the date
+                const key = tag.getAttribute('title')?.split(':')[0] || tag.textContent.trim();
+                const parts = key.split(' - ');
+                const appName = parts[0]?.trim();
+                const envName = parts.length > 1 ? parts.slice(1).join(' - ').trim() : '';
+
+                // Get the day number from the cell
+                const dayNum = cell.querySelector('.gc-day-number')?.textContent;
+                const dateString = `${year}-${String(month+1).padStart(2,'0')}-${String(dayNum).padStart(2,'0')}`;
+
+                if (!appName || !envName) return;
+
+                // Get all machines for this app/env
+                const machines = DataManager.getMachines(appName, envName);
+                const schedules = DataManager.getAllSchedulesFlat().filter(s =>
+                    s.app === appName && s.env === envName
+                );
+
+                // Build detail popup
+                let detailHtml = '<div class="gc-detail-list">';
+                machines.forEach(m => {
+                    const entries = DataManager.getScheduleEntries(appName, envName, m.hostname);
+                    // Filter entries that apply to this date
+                    const dow = new Date(dateString + 'T00:00:00').getDay();
+                    const applicableEntries = entries.filter(entry => {
+                        const rec = entry.recurring || 'none';
+                        if (rec === 'daily') return true;
+                        if (rec === 'weekdays' && dow >= 1 && dow <= 5) return true;
+                        if (rec === 'weekends' && (dow === 0 || dow === 6)) return true;
+                        if (rec === 'custom' && entry.daySchedules && entry.daySchedules[String(dow === 0 ? 7 : dow)]) return true;
+                        if (rec === 'none' && entry.dates && entry.dates.includes(dateString)) return true;
+                        return false;
+                    });
+                    if (applicableEntries.length === 0) return;
+
+                    const entryDetails = applicableEntries.map(e => {
+                        if (e.type === 'shutdown') return 'Shutdown';
+                        if (e.recurring === 'custom' && e.daySchedules) {
+                            const dayKey = String(dow === 0 ? 7 : dow);
+                            const ds = e.daySchedules[dayKey];
+                            return ds ? `${ds.startTime} — ${ds.stopTime}` : `${e.startTime || '?'} — ${e.stopTime || '?'}`;
+                        }
+                        return `${e.startTime || '?'} — ${e.stopTime || '?'}`;
+                    }).join(', ');
+
+                    detailHtml += `<div class="gc-detail-row">
+                        <code class="gc-detail-host">${m.hostname}</code>
+                        <span class="gc-detail-name">${m.machine_name}</span>
+                        <span class="gc-detail-schedule">${entryDetails}</span>
+                    </div>`;
+                });
+                detailHtml += '</div>';
+
+                // Show as popup
+                const existing = document.querySelector('.gc-detail-popup');
+                if (existing) existing.remove();
+
+                const popup = document.createElement('div');
+                popup.className = 'gc-detail-popup';
+                popup.innerHTML = `
+                    <div class="gc-detail-header">
+                        <div>
+                            <strong>${appName} / ${envName}</strong>
+                            <span class="gc-detail-date">${dayNum} ${monthNames[month]} ${year}</span>
+                        </div>
+                        <button class="gc-detail-close">&times;</button>
+                    </div>
+                    ${detailHtml}`;
+                document.body.appendChild(popup);
+
+                // Position near click
+                const rect = tag.getBoundingClientRect();
+                popup.style.top = Math.min(rect.bottom + 8, window.innerHeight - popup.offsetHeight - 20) + 'px';
+                popup.style.left = Math.min(rect.left, window.innerWidth - popup.offsetWidth - 20) + 'px';
+
+                popup.querySelector('.gc-detail-close').addEventListener('click', () => popup.remove());
+                document.addEventListener('click', function handler(ev) {
+                    if (!popup.contains(ev.target) && ev.target !== tag) {
+                        popup.remove();
+                        document.removeEventListener('click', handler);
+                    }
+                });
+            });
+        });
     }
 
     // ============================================
@@ -2067,6 +2507,31 @@ const App = (() => {
             entries.forEach((count, key) => { entryParts.push(`${key} (${count})`); totalServers += count; });
 
             lines.push(`${dayLabel}: ${entryParts.join(', ')} — ${totalServers} server`);
+
+            // Add VM detail per app/env
+            entries.forEach((count, key) => {
+                const parts = key.split(' - ');
+                const appName = parts[0];
+                const envName = parts.length > 1 ? parts.slice(1).join(' - ') : '';
+                const machines = DataManager.getMachines(appName, envName);
+                const dow = date.getDay();
+                machines.forEach(m => {
+                    const mEntries = DataManager.getScheduleEntries(appName, envName, m.hostname);
+                    const applicable = mEntries.filter(entry => {
+                        const rec = entry.recurring || 'none';
+                        if (rec === 'daily') return true;
+                        if (rec === 'weekdays' && dow >= 1 && dow <= 5) return true;
+                        if (rec === 'weekends' && (dow === 0 || dow === 6)) return true;
+                        if (rec === 'none' && entry.dates && entry.dates.includes(ds)) return true;
+                        return false;
+                    });
+                    if (applicable.length > 0) {
+                        const sched = applicable.map(e => e.type === 'shutdown' ? 'Shutdown' : `${e.startTime}-${e.stopTime}`).join(', ');
+                        lines.push(`  → ${m.hostname} (${m.machine_name}): ${sched}`);
+                    }
+                });
+            });
+
             const bgStyle = isWeekend ? 'background:#f9f9f9;' : '';
             htmlTable += `<tr style="${bgStyle}"><td style="padding:4px 10px;border:1px solid #ddd;font-weight:600;">${dayLabel}</td><td style="padding:4px 10px;border:1px solid #ddd;">${entryParts.join('<br>')}</td><td style="padding:4px 10px;border:1px solid #ddd;text-align:center;font-weight:600;">${totalServers}</td></tr>`;
         }
@@ -2988,8 +3453,31 @@ const App = (() => {
 
         document.body.appendChild(overlay);
 
-        // Local perms state
-        const perms = { ...currentPerms };
+        // Local perms state — supports string or object per app
+        // String: "rw" / "ro" (same for all envs)
+        // Object: { "_default": "rw", "Produzione": "ro" } (per-env overrides)
+        const perms = {};
+        Object.entries(currentPerms).forEach(([k, v]) => {
+            perms[k] = v; // Can be string or object
+        });
+        const expandedApps = new Set();
+        const PRODUCTION_ENVS = new Set(['Production', 'Produzione']);
+
+        const _getAppDefault = (appName) => {
+            const val = perms[appName];
+            if (!val) return 'none';
+            if (typeof val === 'object') return val._default || 'rw';
+            return val;
+        };
+
+        const _getEnvPerm = (appName, envName) => {
+            const val = perms[appName];
+            if (!val) return null;
+            if (typeof val === 'object' && val[envName]) return val[envName];
+            // Production defaults to RO when app is RW
+            if (PRODUCTION_ENVS.has(envName) && _getAppDefault(appName) === 'rw') return 'ro';
+            return _getAppDefault(appName);
+        };
 
         const renderAppPerms = (filter = '') => {
             const list = overlay.querySelector('#ueAppPermList');
@@ -2997,19 +3485,48 @@ const App = (() => {
             list.innerHTML = allApps
                 .filter(a => !q || a.toLowerCase().includes(q))
                 .map(appName => {
-                    const p = perms[appName] || 'none';
+                    const p = _getAppDefault(appName);
+                    const envs = DataManager.getEnvironments(appName);
+                    const hasEnvOverrides = typeof perms[appName] === 'object';
+                    const isExpanded = expandedApps.has(appName);
+
+                    let envHtml = '';
+                    if (isExpanded && envs.length > 0 && p !== 'none') {
+                        envHtml = '<div class="user-env-perms">';
+                        envs.forEach(env => {
+                            const ep = _getEnvPerm(appName, env.name);
+                            const isProd = PRODUCTION_ENVS.has(env.name);
+                            envHtml += `<div class="user-env-perm-row" data-app="${appName}" data-env="${env.name}">
+                                <span class="user-env-perm-name">${env.name}${isProd ? ' <small style="color:var(--accent);">(RO default)</small>' : ''}</span>
+                                <div class="user-perm-toggle-group user-perm-toggle-group-sm">
+                                    <button class="user-perm-toggle ${ep === 'rw' ? 'active-rw' : ''}" data-perm="rw" data-env="${env.name}">RW</button>
+                                    <button class="user-perm-toggle ${ep === 'ro' ? 'active-ro' : ''}" data-perm="ro" data-env="${env.name}">RO</button>
+                                </div>
+                            </div>`;
+                        });
+                        envHtml += '</div>';
+                    }
+
                     return `<div class="user-perm-item" data-app="${appName}">
-                        <span class="user-perm-item-name">${appName}</span>
-                        <div class="user-perm-toggle-group">
-                            <button class="user-perm-toggle ${p === 'rw' ? 'active-rw' : ''}" data-perm="rw">RW</button>
-                            <button class="user-perm-toggle ${p === 'ro' ? 'active-ro' : ''}" data-perm="ro">RO</button>
-                            <button class="user-perm-toggle ${p === 'none' ? 'active-none' : ''}" data-perm="none">\u2014</button>
+                        <div class="user-perm-item-header">
+                            <span class="user-perm-item-name">${appName}</span>
+                            <div style="display:flex;align-items:center;gap:6px;">
+                                <div class="user-perm-toggle-group">
+                                    <button class="user-perm-toggle ${p === 'rw' ? 'active-rw' : ''}" data-perm="rw">RW</button>
+                                    <button class="user-perm-toggle ${p === 'ro' ? 'active-ro' : ''}" data-perm="ro">RO</button>
+                                    <button class="user-perm-toggle ${p === 'none' ? 'active-none' : ''}" data-perm="none">\u2014</button>
+                                </div>
+                                ${envs.length > 0 && p !== 'none' ? `<button class="user-perm-expand-btn ${isExpanded ? 'expanded' : ''}" data-app="${appName}" title="Permessi per ambiente">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                                </button>` : ''}
+                            </div>
                         </div>
+                        ${envHtml}
                     </div>`;
                 }).join('');
 
-            // Bind toggles
-            list.querySelectorAll('.user-perm-toggle').forEach(btn => {
+            // Bind app-level toggles
+            list.querySelectorAll('.user-perm-item-header > div > .user-perm-toggle-group > .user-perm-toggle').forEach(btn => {
                 btn.addEventListener('click', () => {
                     const item = btn.closest('.user-perm-item');
                     const app = item.dataset.app;
@@ -3017,13 +3534,52 @@ const App = (() => {
                     if (perm === 'none') {
                         delete perms[app];
                     } else {
-                        perms[app] = perm;
+                        // Preserve env overrides if they exist
+                        if (typeof perms[app] === 'object') {
+                            perms[app]._default = perm;
+                        } else {
+                            perms[app] = perm;
+                        }
                     }
-                    // Update UI
-                    item.querySelectorAll('.user-perm-toggle').forEach(b => {
-                        b.classList.remove('active-rw', 'active-ro', 'active-none');
-                    });
-                    btn.classList.add(perm === 'rw' ? 'active-rw' : perm === 'ro' ? 'active-ro' : 'active-none');
+                    renderAppPerms(overlay.querySelector('#ueAppSearch').value || '');
+                });
+            });
+
+            // Bind expand buttons
+            list.querySelectorAll('.user-perm-expand-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const app = btn.dataset.app;
+                    if (expandedApps.has(app)) expandedApps.delete(app);
+                    else expandedApps.add(app);
+                    renderAppPerms(overlay.querySelector('#ueAppSearch').value || '');
+                });
+            });
+
+            // Bind env-level toggles
+            list.querySelectorAll('.user-env-perm-row .user-perm-toggle').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const row = btn.closest('.user-env-perm-row');
+                    const app = row.dataset.app;
+                    const env = row.dataset.env;
+                    const perm = btn.dataset.perm;
+                    // Convert to object format if needed
+                    if (typeof perms[app] !== 'object') {
+                        perms[app] = { _default: perms[app] || 'rw' };
+                    }
+                    // Check if the env perm matches the default — if so, remove override
+                    const dflt = perms[app]._default || 'rw';
+                    const effectiveDefault = PRODUCTION_ENVS.has(env) && dflt === 'rw' ? 'ro' : dflt;
+                    if (perm === effectiveDefault) {
+                        delete perms[app][env];
+                    } else {
+                        perms[app][env] = perm;
+                    }
+                    // If only _default remains, simplify back to string
+                    const keys = Object.keys(perms[app]).filter(k => k !== '_default');
+                    if (keys.length === 0) {
+                        perms[app] = perms[app]._default;
+                    }
+                    renderAppPerms(overlay.querySelector('#ueAppSearch').value || '');
                 });
             });
         };
@@ -3265,6 +3821,7 @@ const App = (() => {
 
     async function handleRefresh() {
         if (isRefreshing || refreshCooldownTimer) return;
+        _log('INFO', 'Refresh', 'Aggiornamento stato avviato');
 
         // Check for unsaved changes — show confirmation tooltip
         const pendingChanges = DynamoService.getModifiedAppEnvs(DataManager.getSchedulesRef());
@@ -3312,6 +3869,7 @@ const App = (() => {
             AuditLog.log('Aggiornamento stato', 'Dati ricaricati');
             showToast('Stato aggiornato', 'success');
         } catch (err) {
+            _log('ERROR', 'Refresh', 'Aggiornamento fallito', { error: err.message });
             console.error('[Refresh] Error:', err);
             if (DynamoService.CONFIG.enabled) updateDynamoStatus('offline');
             showToast('Errore durante l\'aggiornamento: ' + (err.message || 'Riprova'), 'error');
@@ -3411,6 +3969,7 @@ const App = (() => {
     async function handleSaveConfig() {
         if (isSaving) return; // Prevent double-save
         const changes = DynamoService.getModifiedAppEnvs(DataManager.getSchedulesRef());
+        _log('INFO', 'Save', 'Salvataggio configurazione avviato', { changes: changes.length });
         if (changes.length === 0) {
             showToast('Nessuna modifica da salvare', 'info');
             return;
@@ -3574,6 +4133,7 @@ const App = (() => {
             }
             renderHomeDashboard();
         } catch (err) {
+            _log('ERROR', 'Save', 'Salvataggio fallito', { error: err.message });
             console.error('[Save] Error:', err);
             showToast('Errore nel salvataggio: ' + (err.message || 'Errore sconosciuto'), 'error');
         } finally {
