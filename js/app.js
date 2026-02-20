@@ -1100,8 +1100,10 @@ const App = (() => {
         const hasSchedules = stats.scheduled > 0;
 
         grid.innerHTML = '';
-        $('#envTitle').innerHTML = `<span class="env-title-app">${appName}</span><span class="env-title-sep">/</span>${envName}`;
-        $('#machineCount').innerHTML = `${machines.length} server <span class="env-stats-badge ${hasSchedules ? 'has-schedules' : ''}">${stats.scheduled}/${stats.total} pianificati</span>`;
+        const inMaint = DataManager.isEnvInMaintenanceNow(appName, envName);
+        const maintWindows = DataManager.getMaintenanceWindows(appName, envName);
+        $('#envTitle').innerHTML = `<span class="env-title-app">${appName}</span><span class="env-title-sep">/</span>${envName}${inMaint ? ' <span class="env-maint-badge">MANUTENZIONE</span>' : ''}`;
+        $('#machineCount').innerHTML = `${machines.length} server <span class="env-stats-badge ${hasSchedules ? 'has-schedules' : ''}">${stats.scheduled}/${stats.total} pianificati</span>${maintWindows.length > 0 ? ` <span class="env-maint-count">${maintWindows.length} finestre manutenzione</span>` : ''}`;
 
         // Search + Pianifica Ambiente row
         let controlsRow = document.querySelector('.machine-controls-row');
@@ -1118,9 +1120,9 @@ const App = (() => {
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                 Pianifica Ambiente
             </button>` : ''}
-            <button class="btn-secondary btn-blackout" id="blackoutBtn" title="Gestisci periodi di blackout">
+            <button class="btn-secondary btn-maintenance" id="maintenanceBtn" title="Aggiungi finestra di manutenzione">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="9" y1="16" x2="15" y2="16"/></svg>
-                Blackout
+                Aggiungi manutenzione
             </button>`;
 
         // Remove old search bar if exists
@@ -1134,8 +1136,8 @@ const App = (() => {
         const planBtn = controlsRow.querySelector('#planEnvBtn');
         if (planBtn) planBtn.addEventListener('click', () => openModal('environment'));
 
-        const blackoutBtn = controlsRow.querySelector('#blackoutBtn');
-        if (blackoutBtn) blackoutBtn.addEventListener('click', () => openBlackoutPanel(appName, envName));
+        const maintenanceBtn = controlsRow.querySelector('#maintenanceBtn');
+        if (maintenanceBtn) maintenanceBtn.addEventListener('click', () => openMaintenancePanel(appName, envName));
 
         // Hide the original applyAllBtn
         const origBtn = $('#applyAllBtn');
@@ -1666,94 +1668,117 @@ const App = (() => {
     }
 
     // ============================================
-    // Blackout Periods Panel
+    // Maintenance Windows Panel
     // ============================================
-    function openBlackoutPanel(appName, envName) {
-        _log('INFO', 'Blackout', 'Apertura pannello blackout', { app: appName, env: envName });
-        const existing = document.querySelector('.blackout-overlay');
+    function openMaintenancePanel(appName, envName) {
+        _log('INFO', 'Maintenance', 'Apertura pannello manutenzione', { app: appName, env: envName });
+        const existing = document.querySelector('.maint-overlay');
         if (existing) existing.remove();
 
-        const periods = DataManager.getBlackoutPeriods({ app: appName, env: envName });
-        const scope = { app: appName, env: envName };
-
         const overlay = document.createElement('div');
-        overlay.className = 'blackout-overlay';
+        overlay.className = 'maint-overlay';
         overlay.innerHTML = `
-            <div class="blackout-panel">
-                <div class="blackout-header">
-                    <h3>Periodi di Blackout</h3>
-                    <span class="blackout-subtitle">${appName} / ${envName}</span>
-                    <button class="btn-icon blackout-close">&times;</button>
-                </div>
-                <div class="blackout-info">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                    <span>Durante i periodi di blackout, tutte le schedulazioni dell'ambiente vengono sospese. Utile per manutenzioni, release freeze o festivit\u00e0.</span>
-                </div>
-                <div class="blackout-add-form">
-                    <div class="blackout-form-row">
-                        <div class="blackout-form-field">
-                            <label>Data inizio</label>
-                            <input type="date" id="blkStartDate" value="${new Date().toISOString().split('T')[0]}">
-                        </div>
-                        <div class="blackout-form-field">
-                            <label>Data fine</label>
-                            <input type="date" id="blkEndDate" value="${new Date().toISOString().split('T')[0]}">
-                        </div>
-                        <div class="blackout-form-field" style="flex:2">
-                            <label>Motivo</label>
-                            <input type="text" id="blkReason" placeholder="es. Release freeze, manutenzione..." maxlength="200">
-                        </div>
-                        <button class="btn-primary blackout-add-btn" id="blkAddBtn">Aggiungi</button>
+            <div class="maint-panel">
+                <div class="maint-header">
+                    <div>
+                        <h3>Finestre di Manutenzione</h3>
+                        <span class="maint-subtitle">${appName} / ${envName}</span>
                     </div>
+                    <button class="btn-icon maint-close-btn" title="Chiudi">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
                 </div>
-                <div class="blackout-list" id="blkList"></div>
+                <div class="maint-info">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    <span>Durante le finestre di manutenzione tutte le schedulazioni di questo ambiente vengono <strong>sospese</strong>. I cronjob non verranno generati per le date comprese nei periodi attivi. Premi <strong>Salva</strong> dopo aver aggiunto o rimosso finestre per sincronizzare.</span>
+                </div>
+                <div class="maint-add-form">
+                    <div class="maint-form-row">
+                        <div class="maint-form-field">
+                            <label>Data inizio</label>
+                            <input type="date" id="maintStart" value="${new Date().toISOString().split('T')[0]}">
+                        </div>
+                        <div class="maint-form-field">
+                            <label>Data fine</label>
+                            <input type="date" id="maintEnd" value="${new Date().toISOString().split('T')[0]}">
+                        </div>
+                        <div class="maint-form-field" style="flex:2">
+                            <label>Motivo</label>
+                            <input type="text" id="maintReason" placeholder="es. Release freeze, manutenzione programmata, festivit\u00e0..." maxlength="200">
+                        </div>
+                    </div>
+                    <button class="btn-primary maint-add-btn" id="maintAddBtn">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        Aggiungi finestra
+                    </button>
+                </div>
+                <div class="maint-list" id="maintList"></div>
             </div>`;
         document.body.appendChild(overlay);
 
         const renderList = () => {
-            const list = overlay.querySelector('#blkList');
-            const currentPeriods = DataManager.getBlackoutPeriods(scope);
-            if (currentPeriods.length === 0) {
-                list.innerHTML = '<div class="blackout-empty">Nessun periodo di blackout attivo</div>';
+            const list = overlay.querySelector('#maintList');
+            const windows = DataManager.getMaintenanceWindows(appName, envName);
+            if (windows.length === 0) {
+                list.innerHTML = '<div class="maint-empty">Nessuna finestra di manutenzione configurata</div>';
                 return;
             }
-            list.innerHTML = currentPeriods.map(p => {
-                const isActive = new Date().toISOString().split('T')[0] >= p.startDate && new Date().toISOString().split('T')[0] <= p.endDate;
-                return `<div class="blackout-item ${isActive ? 'active' : ''}">
-                    <div class="blackout-item-dates">
-                        <strong>${p.startDate}</strong> \u2014 <strong>${p.endDate}</strong>
-                        ${isActive ? '<span class="blackout-active-badge">ATTIVO</span>' : ''}
+            const today = new Date().toISOString().split('T')[0];
+            list.innerHTML = windows.map(w => {
+                const isActive = today >= w.startDate && today <= w.endDate;
+                const isFuture = today < w.startDate;
+                const isPast = today > w.endDate;
+                return `<div class="maint-item ${isActive ? 'active' : ''} ${isPast ? 'past' : ''}">
+                    <div class="maint-item-body">
+                        <div class="maint-item-dates">
+                            <strong>${w.startDate}</strong> <span class="maint-item-sep">\u2192</span> <strong>${w.endDate}</strong>
+                            ${isActive ? '<span class="maint-badge-active">IN CORSO</span>' : ''}
+                            ${isFuture ? '<span class="maint-badge-future">PIANIFICATA</span>' : ''}
+                            ${isPast ? '<span class="maint-badge-past">CONCLUSA</span>' : ''}
+                        </div>
+                        ${w.reason ? `<div class="maint-item-reason">${w.reason}</div>` : ''}
                     </div>
-                    <div class="blackout-item-reason">${p.reason || 'Nessun motivo specificato'}</div>
-                    <button class="blackout-remove-btn" data-id="${p.id}" title="Rimuovi">&times;</button>
+                    <button class="maint-remove-btn" data-id="${w.id}" title="Rimuovi finestra">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                    </button>
                 </div>`;
             }).join('');
-            list.querySelectorAll('.blackout-remove-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    DataManager.removeBlackoutPeriod(scope, btn.dataset.id);
-                    AuditLog.log('Rimosso blackout', `${appName}/${envName} - ID: ${btn.dataset.id}`);
-                    showToast('Periodo di blackout rimosso', 'success');
+            list.querySelectorAll('.maint-remove-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const confirmed = await confirmDialog({
+                        title: 'Rimuovere finestra di manutenzione?',
+                        message: 'Le schedulazioni dell\'ambiente torneranno attive per questo periodo. Ricorda di premere <strong>Salva</strong> per sincronizzare.',
+                        confirmLabel: 'Rimuovi',
+                        iconType: 'warning',
+                        confirmClass: 'btn-primary'
+                    });
+                    if (!confirmed) return;
+                    DataManager.removeMaintenanceWindow(appName, envName, btn.dataset.id);
+                    AuditLog.log('Rimossa finestra manutenzione', `${appName}/${envName}`);
+                    updateChangesBadge();
                     renderList();
+                    showToast('Finestra di manutenzione rimossa — premi Salva per sincronizzare', 'info');
                 });
             });
         };
 
         renderList();
 
-        overlay.querySelector('#blkAddBtn').addEventListener('click', () => {
-            const start = overlay.querySelector('#blkStartDate').value;
-            const end = overlay.querySelector('#blkEndDate').value;
-            const reason = overlay.querySelector('#blkReason').value.trim();
+        overlay.querySelector('#maintAddBtn').addEventListener('click', () => {
+            const start = overlay.querySelector('#maintStart').value;
+            const end = overlay.querySelector('#maintEnd').value;
+            const reason = overlay.querySelector('#maintReason').value.trim();
             if (!start || !end) { showToast('Inserisci date valide', 'error'); return; }
             if (start > end) { showToast('La data di inizio deve essere prima della data di fine', 'error'); return; }
-            DataManager.addBlackoutPeriod(scope, start, end, reason);
-            AuditLog.log('Aggiunto blackout', `${appName}/${envName}: ${start} - ${end} (${reason})`);
-            showToast('Periodo di blackout aggiunto', 'success');
-            overlay.querySelector('#blkReason').value = '';
+            DataManager.addMaintenanceWindow(appName, envName, start, end, reason);
+            AuditLog.log('Aggiunta finestra manutenzione', `${appName}/${envName}: ${start} — ${end} (${reason})`);
+            updateChangesBadge();
+            overlay.querySelector('#maintReason').value = '';
             renderList();
+            showToast('Finestra di manutenzione aggiunta — premi Salva per sincronizzare', 'success');
         });
 
-        overlay.querySelector('.blackout-close').addEventListener('click', () => overlay.remove());
+        overlay.querySelector('.maint-close-btn').addEventListener('click', () => overlay.remove());
         overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
     }
 
@@ -4043,11 +4068,33 @@ const App = (() => {
         changes.forEach(c => {
             let detailHtml = '';
             // Compare each hostname
+            const MKEY = DataManager.MAINTENANCE_KEY;
             const allHostnames = new Set([...Object.keys(c.data), ...Object.keys(DynamoService.extractAppEnvData(snapshot, c.app, c.env))]);
             allHostnames.forEach(hostname => {
                 const curr = c.data[hostname] || [];
                 const prev = (DynamoService.extractAppEnvData(snapshot, c.app, c.env))[hostname] || [];
                 if (JSON.stringify(curr) === JSON.stringify(prev)) return;
+
+                // Special handling for maintenance windows
+                if (hostname === MKEY) {
+                    const added = curr.filter(w => !prev.find(p => p.id === w.id));
+                    const removed = prev.filter(p => !curr.find(w => w.id === p.id));
+                    added.forEach(w => {
+                        detailHtml += `<div class="save-hostname-row maint-change">
+                            <span class="save-hostname-name"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> Manutenzione</span>
+                            <span class="save-detail-badge added">Aggiunta</span>
+                            <div class="save-entry-detail"><span class="save-entry-text">${w.startDate} \u2192 ${w.endDate}${w.reason ? ' — ' + w.reason : ''}</span></div>
+                        </div>`;
+                    });
+                    removed.forEach(w => {
+                        detailHtml += `<div class="save-hostname-row maint-change">
+                            <span class="save-hostname-name"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> Manutenzione</span>
+                            <span class="save-detail-badge removed">Rimossa</span>
+                            <div class="save-entry-detail"><span class="save-entry-text">${w.startDate} \u2192 ${w.endDate}${w.reason ? ' — ' + w.reason : ''}</span></div>
+                        </div>`;
+                    });
+                    return;
+                }
 
                 let changeType = '';
                 if (prev.length === 0 && curr.length > 0) changeType = '<span class="save-detail-badge added">Aggiunto</span>';

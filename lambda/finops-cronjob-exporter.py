@@ -505,7 +505,31 @@ def _build_cronjob_output(items):
         if not schedules or not isinstance(schedules, dict):
             continue
 
-        sorted_hostnames = sorted(schedules.keys())
+        # Check maintenance windows — skip entire env if today is in maintenance
+        maintenance_windows = schedules.get("__maintenance__", [])
+        if isinstance(maintenance_windows, list) and maintenance_windows:
+            today = time.strftime("%Y-%m-%d", time.gmtime())
+            env_in_maintenance = False
+            for mw in maintenance_windows:
+                if isinstance(mw, dict):
+                    start = mw.get("startDate", "")
+                    end = mw.get("endDate", "")
+                    if start and end and start <= today <= end:
+                        env_in_maintenance = True
+                        _log("INFO", "Ambiente in manutenzione, cronjob sospesi",
+                             app=app, env=env, start=start, end=end,
+                             reason=mw.get("reason", ""))
+                        break
+            if env_in_maintenance:
+                total_envs += 1
+                lines.append("# =========================================")
+                lines.append(f"# Applicazione: {app} | Ambiente: {env}")
+                lines.append(f"# ** MANUTENZIONE ATTIVA — cronjob sospesi **")
+                lines.append("# =========================================")
+                lines.append("")
+                continue
+
+        sorted_hostnames = sorted(k for k in schedules.keys() if k != "__maintenance__")
         env_crons = []
 
         for hostname in sorted_hostnames:

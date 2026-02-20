@@ -9,8 +9,8 @@ const DataManager = (() => {
     let currentUser = null;
     let notes = {};
     let systemMessages = [];
-    let blackoutPeriods = {};  // { "app|env": [{ id, startDate, endDate, reason }] }  or { "_global": [...] }
     let scheduleExceptions = {}; // { entryId: [{ date, action: 'skip'|'override', startTime?, stopTime?, reason? }] }
+    const MAINTENANCE_KEY = '__maintenance__'; // Special hostname key for maintenance windows
     const SCHEDULE_TEMPLATES = [
         { id: 'standard_dev', name: 'Orario Standard Dev', type: 'window', startTime: '08:00', stopTime: '20:00', recurring: 'weekdays', description: 'Lun-Ven 08:00-20:00' },
         { id: 'extended_dev', name: 'Orario Esteso Dev', type: 'window', startTime: '06:00', stopTime: '23:00', recurring: 'weekdays', description: 'Lun-Ven 06:00-23:00' },
@@ -590,8 +590,8 @@ const DataManager = (() => {
 
             if (!applies) continue;
 
-            // Check blackout periods
-            if (_isDateBlackedOut(appName, envName, dateStr)) continue;
+            // Check maintenance windows
+            if (isDateInMaintenance(appName, envName, dateStr)) continue;
 
             // Check exceptions
             const exception = _getException(entry, dateStr);
@@ -740,57 +740,43 @@ const DataManager = (() => {
     }
 
     // ============================================
-    // Blackout Periods (schedule suspension)
+    // Maintenance Windows (stored inside schedules, synced via DynamoDB)
+    // Uses special hostname key "__maintenance__" so they travel
+    // with the save/load/snapshot flow automatically.
     // ============================================
-    function _isDateBlackedOut(appName, envName, dateStr) {
-        const keys = [`${appName}|${envName}`, '_global'];
-        for (const key of keys) {
-            const periods = blackoutPeriods[key];
-            if (!periods) continue;
-            for (const p of periods) {
-                if (dateStr >= p.startDate && dateStr <= p.endDate) return true;
-            }
-        }
-        return false;
+    function _maintenanceKey(appName, envName) {
+        return scheduleKey(appName, envName, MAINTENANCE_KEY);
     }
 
-    function addBlackoutPeriod(scope, startDate, endDate, reason) {
-        // scope: { app, env } or '_global'
-        const key = typeof scope === 'string' ? scope : `${scope.app}|${scope.env}`;
-        if (!blackoutPeriods[key]) blackoutPeriods[key] = [];
-        const period = { id: generateId(), startDate, endDate, reason: reason || '' };
-        blackoutPeriods[key].push(period);
-        _saveBlackoutsToStorage();
-        return period.id;
+    function getMaintenanceWindows(appName, envName) {
+        return schedules[_maintenanceKey(appName, envName)] || [];
     }
 
-    function removeBlackoutPeriod(scope, periodId) {
-        const key = typeof scope === 'string' ? scope : `${scope.app}|${scope.env}`;
-        if (!blackoutPeriods[key]) return;
-        blackoutPeriods[key] = blackoutPeriods[key].filter(p => p.id !== periodId);
-        if (blackoutPeriods[key].length === 0) delete blackoutPeriods[key];
-        _saveBlackoutsToStorage();
+    function addMaintenanceWindow(appName, envName, startDate, endDate, reason) {
+        const key = _maintenanceKey(appName, envName);
+        if (!schedules[key]) schedules[key] = [];
+        const win = { id: generateId(), type: 'maintenance', startDate, endDate, reason: reason || '' };
+        schedules[key].push(win);
+        saveSchedulesToStorage();
+        return win.id;
     }
 
-    function getBlackoutPeriods(scope) {
-        const key = typeof scope === 'string' ? scope : `${scope.app}|${scope.env}`;
-        const specific = blackoutPeriods[key] || [];
-        const global = blackoutPeriods['_global'] || [];
-        return [...global, ...specific];
+    function removeMaintenanceWindow(appName, envName, windowId) {
+        const key = _maintenanceKey(appName, envName);
+        if (!schedules[key]) return;
+        schedules[key] = schedules[key].filter(w => w.id !== windowId);
+        if (schedules[key].length === 0) delete schedules[key];
+        saveSchedulesToStorage();
     }
 
-    function getAllBlackoutPeriods() { return blackoutPeriods; }
-
-    function _saveBlackoutsToStorage() {
-        try { localStorage.setItem('shutdownScheduler_blackouts', JSON.stringify(blackoutPeriods)); }
-        catch (e) { console.warn('Could not save blackouts', e); }
+    function isDateInMaintenance(appName, envName, dateStr) {
+        const windows = getMaintenanceWindows(appName, envName);
+        return windows.some(w => dateStr >= w.startDate && dateStr <= w.endDate);
     }
 
-    function _loadBlackoutsFromStorage() {
-        try {
-            const saved = localStorage.getItem('shutdownScheduler_blackouts');
-            if (saved) blackoutPeriods = JSON.parse(saved);
-        } catch (e) { blackoutPeriods = {}; }
+    function isEnvInMaintenanceNow(appName, envName) {
+        const today = new Date().toISOString().split('T')[0];
+        return isDateInMaintenance(appName, envName, today);
     }
 
     // ============================================
@@ -880,7 +866,6 @@ const DataManager = (() => {
             const saved = localStorage.getItem('shutdownScheduler_notes');
             if (saved) notes = JSON.parse(saved);
         } catch (e) { notes = {}; }
-        _loadBlackoutsFromStorage();
         _loadExceptionsFromStorage();
     }
 
@@ -934,6 +919,7 @@ const DataManager = (() => {
         const result = [];
         for (const [key, entries] of Object.entries(schedules)) {
             const [app, env, hostname] = key.split('|');
+            if (hostname === MAINTENANCE_KEY) continue;
             const machine = machines.find(m => m.application === app && m.environment === env && m.hostname === hostname);
             entries.forEach(entry => {
                 result.push({
@@ -958,6 +944,7 @@ const DataManager = (() => {
         const result = [];
         for (const [key, entries] of Object.entries(schedules)) {
             const [app, env, hostname] = key.split('|');
+            if (hostname === MAINTENANCE_KEY) continue;
             const machine = machines.find(m => m.application === app && m.environment === env && m.hostname === hostname);
             entries.forEach(entry => {
                 result.push({ app, env, hostname, machine, entry });
@@ -975,8 +962,8 @@ const DataManager = (() => {
             environments: apps.reduce((sum, a) => sum + a.envCount, 0),
             totalMachines: machines.length,
             accessibleMachines: apps.reduce((sum, a) => sum + a.machineCount, 0),
-            scheduledMachines: Object.keys(schedules).length,
-            totalSchedules: Object.values(schedules).reduce((sum, arr) => sum + arr.length, 0),
+            scheduledMachines: Object.keys(schedules).filter(k => !k.endsWith('|' + MAINTENANCE_KEY)).length,
+            totalSchedules: Object.entries(schedules).filter(([k]) => !k.endsWith('|' + MAINTENANCE_KEY)).reduce((sum, [, arr]) => sum + arr.length, 0),
             notesCount: getAllNotesCount()
         };
     }
@@ -1008,6 +995,7 @@ const DataManager = (() => {
 
         for (const [key, entries] of Object.entries(schedules)) {
             const [app, env, hostname] = key.split('|');
+            if (hostname === MAINTENANCE_KEY) continue;
             entries.forEach(entry => {
                 if (entry.recurring && entry.recurring !== 'none') {
                     upcoming.push({ app, env, hostname, entry, recurring: true });
@@ -1119,8 +1107,9 @@ const DataManager = (() => {
         isGlobalReadOnly, canViewVMList, canViewEBSList, canViewCalculator,
         getVMListMachines, generateCronjobs,
         loadEBSVolumes, getEBSVolumes,
-        // Blackout periods
-        addBlackoutPeriod, removeBlackoutPeriod, getBlackoutPeriods, getAllBlackoutPeriods,
+        // Maintenance windows
+        addMaintenanceWindow, removeMaintenanceWindow, getMaintenanceWindows,
+        isDateInMaintenance, isEnvInMaintenanceNow, MAINTENANCE_KEY,
         // Exceptions
         addScheduleException, removeScheduleException, getScheduleExceptions, getAllExceptions,
         // Templates
