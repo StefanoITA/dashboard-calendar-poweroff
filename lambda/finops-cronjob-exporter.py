@@ -28,7 +28,9 @@ Edge case gestiti:
   - Validazione orari: ore 0-23, minuti 0-59, startTime < stopTime per window
   - Date specifiche: raggruppate per mese per compattezza, validate (mese 1-12, giorno 1-31)
   - Tipi schedule: window (start+stop) e shutdown (solo stop)
-  - Recurring: daily, weekdays, weekends, one-time (dates)
+  - Recurring: daily, weekdays, weekends, custom (per-day), one-time (dates)
+  - Custom per-day: diversi orari per ogni giorno della settimana (daySchedules)
+  - Giorni con orari identici vengono raggruppati in un unico cronjob
   - Output deterministico: ordinato per app → env → hostname
 """
 
@@ -48,8 +50,10 @@ EXPORTER_TOKEN = os.environ.get("EXPORTER_TOKEN", "")
 SCHEDULES_TABLE = os.environ.get("SCHEDULES_TABLE", "FinOpsShutdownScheduler")
 DEBUG = os.environ.get("DEBUG", "false").lower() in ("true", "1", "yes")
 
-_VALID_RECURRING = {"daily", "weekdays", "weekends", "none"}
+_VALID_RECURRING = {"daily", "weekdays", "weekends", "none", "custom"}
 _VALID_TYPES = {"window", "shutdown"}
+# ISO day (1=Mon..7=Sun) → cron day (0=Sun,1=Mon..6=Sat)
+_ISO_TO_CRON = {1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 0}
 _DAYS_IN_MONTH = {1: 31, 2: 29, 3: 31, 4: 30, 5: 31, 6: 30,
                   7: 31, 8: 31, 9: 30, 10: 31, 11: 30, 12: 31}
 
@@ -136,7 +140,7 @@ def _validate_entry(entry, hostname):
              hostname=hostname, recurring=recurring)
         return None
 
-    if entry_type == "window":
+    if entry_type == "window" and recurring != "custom":
         start = _parse_time(entry.get("startTime"))
         stop = _parse_time(entry.get("stopTime"))
         if start is None or stop is None:
@@ -151,6 +155,41 @@ def _validate_entry(entry, hostname):
                  startTime=entry.get("startTime"),
                  stopTime=entry.get("stopTime"))
             return None
+
+    # Validate custom per-day scheduling
+    if recurring == "custom":
+        day_schedules = entry.get("daySchedules", {})
+        if not day_schedules or not isinstance(day_schedules, dict):
+            _log("WARN", "Schedule custom senza daySchedules, ignorata", hostname=hostname)
+            return None
+        valid_days = {}
+        for day_key, ds in day_schedules.items():
+            try:
+                day_num = int(day_key)
+                if day_num < 1 or day_num > 7:
+                    continue
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(ds, dict):
+                continue
+            if entry_type == "window":
+                start = _parse_time(ds.get("startTime"))
+                stop = _parse_time(ds.get("stopTime"))
+                if start is None or stop is None:
+                    _log("WARN", "Orario invalido per giorno custom, ignorato",
+                         hostname=hostname, day=day_key)
+                    continue
+                if _time_to_minutes(*start) >= _time_to_minutes(*stop):
+                    _log("WARN", "startTime >= stopTime per giorno custom, ignorato",
+                         hostname=hostname, day=day_key)
+                    continue
+            valid_days[day_key] = ds
+        if not valid_days:
+            _log("WARN", "Nessun giorno valido per schedule custom, ignorata",
+                 hostname=hostname)
+            return None
+        entry = dict(entry)
+        entry["daySchedules"] = valid_days
 
     # Valida date per schedule one-time
     if recurring == "none":
@@ -210,6 +249,7 @@ def _merge_overlapping_windows(entries):
     # Raggruppa window per chiave ricorrente
     # Per recurring: la chiave è il valore (daily, weekdays, weekends)
     # Per one-time: la chiave è la tupla di date ordinate
+    # Per custom: la chiave include i giorni attivi (non fare merge tra custom diversi)
     groups = defaultdict(list)
     for w in windows:
         recurring = w.get("recurring", "none")
@@ -217,6 +257,11 @@ def _merge_overlapping_windows(entries):
             # Raggruppa per date identiche
             dates_key = tuple(sorted(w.get("dates", [])))
             key = ("dates", dates_key)
+        elif recurring == "custom":
+            # Custom entries: group by day set for merging
+            day_schedules = w.get("daySchedules", {})
+            days_key = tuple(sorted(day_schedules.keys()))
+            key = ("custom", days_key)
         else:
             key = ("recurring", recurring)
         groups[key].append(w)
@@ -339,6 +384,40 @@ def _generate_crons_for_entry(entry):
             crons.append(("stop", f"{stop_m} {stop_h} * * 0,6"))
         else:
             crons.append(("stop", "0 0 * * 0,6"))
+
+    elif recurring == "custom":
+        # Custom per-day scheduling: group days with identical times
+        day_schedules = entry.get("daySchedules", {})
+        time_groups = {}
+        for iso_day_str, ds in day_schedules.items():
+            if not ds or not isinstance(ds, dict):
+                continue
+            ds_start = _parse_time(ds.get("startTime"))
+            ds_stop = _parse_time(ds.get("stopTime"))
+            if ds_start is None or ds_stop is None:
+                continue
+            time_key = f"{ds.get('startTime')}|{ds.get('stopTime')}"
+            if time_key not in time_groups:
+                time_groups[time_key] = {"start": ds_start, "stop": ds_stop, "days": []}
+            try:
+                iso_day = int(iso_day_str)
+                cron_day = _ISO_TO_CRON.get(iso_day)
+                if cron_day is not None:
+                    time_groups[time_key]["days"].append(cron_day)
+            except (ValueError, TypeError):
+                continue
+
+        for group in time_groups.values():
+            if not group["days"]:
+                continue
+            day_str = ",".join(str(d) for d in sorted(group["days"]))
+            s_h, s_m = group["start"]
+            e_h, e_m = group["stop"]
+            if entry_type == "window":
+                crons.append(("start", f"{s_m} {s_h} * * {day_str}"))
+                crons.append(("stop", f"{e_m} {e_h} * * {day_str}"))
+            else:
+                crons.append(("stop", f"0 0 * * {day_str}"))
 
     elif dates:
         # Raggruppa date per anno-mese per cronjob compatti
