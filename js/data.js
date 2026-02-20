@@ -1119,6 +1119,8 @@ const DataManager = (() => {
         addScheduleException, removeScheduleException, getScheduleExceptions, getAllExceptions,
         // Templates
         getScheduleTemplates, applyTemplate,
+        // Exposed for VM-level refresh
+        saveSchedulesToStoragePublic: saveSchedulesToStorage,
         get machines() { return machines; }
     };
 })();
