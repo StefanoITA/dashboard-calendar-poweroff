@@ -1476,7 +1476,7 @@ const App = (() => {
             let detailHtml = '';
             if (entry.recurring === 'custom' && entry.daySchedules) {
                 const dayLines = Object.entries(entry.daySchedules).map(([d, ds]) => {
-                    const dayName = ['','Lun','Mar','Mer','Gio','Ven','Sab','Dom'][Number(d)] || d;
+                    const dayName = _DAY_SHORT[d] || d;
                     return `<span class="custom-day-badge">${dayName} ${ds.startTime}-${ds.stopTime}</span>`;
                 }).join(' ');
                 detailHtml = `<div class="schedule-info">${dayLines}</div>`;
@@ -1757,8 +1757,14 @@ const App = (() => {
         overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
     }
 
-    // Custom per-day schedule state
-    let customDaySchedules = {}; // { "1": { startTime, stopTime, enabled }, ... }
+    // Custom per-day schedule state — keys are string day abbreviations: mon,tue,wed,thu,fri,sat,sun
+    // This avoids DynamoDB converting numeric keys to arrays
+    let customDaySchedules = {}; // { "mon": { startTime, stopTime, enabled }, ... }
+    const _DAY_KEYS = ['mon','tue','wed','thu','fri','sat','sun'];
+    const _DAY_LABELS = { mon:'Lunedì', tue:'Martedì', wed:'Mercoledì', thu:'Giovedì', fri:'Venerdì', sat:'Sabato', sun:'Domenica' };
+    const _DAY_SHORT = { mon:'Lun', tue:'Mar', wed:'Mer', thu:'Gio', fri:'Ven', sat:'Sab', sun:'Dom' };
+    // JS getDay(): 0=Sun → 'sun', 1=Mon → 'mon', etc.
+    const _JS_DOW_TO_KEY = ['sun','mon','tue','wed','thu','fri','sat'];
 
     function loadEntryIntoModal(entry) {
         if (entry) {
@@ -1770,12 +1776,17 @@ const App = (() => {
             if (entry.stopTime) setTimePickerValue('stopTimePicker', entry.stopTime);
             $$('input[name="recurring"]').forEach(r => { r.checked = r.value === currentRecurring; });
             selectedDates.clear();
-            if (entry.dates) entry.dates.forEach(d => selectedDates.add(d));
+            if (entry.dates && Array.isArray(entry.dates)) entry.dates.forEach(d => selectedDates.add(d));
             // Load custom day schedules
             if (entry.recurring === 'custom' && entry.daySchedules) {
                 customDaySchedules = {};
+                // Initialize all days as disabled
+                _DAY_KEYS.forEach(k => { customDaySchedules[k] = { startTime: '08:00', stopTime: '20:00', enabled: false }; });
+                // Enable days from saved data
                 for (const [day, ds] of Object.entries(entry.daySchedules)) {
-                    customDaySchedules[day] = { ...ds, enabled: true };
+                    if (ds && typeof ds === 'object' && ds.startTime) {
+                        customDaySchedules[day] = { startTime: ds.startTime, stopTime: ds.stopTime, enabled: true };
+                    }
                 }
             } else {
                 _initCustomDayDefaults();
@@ -1795,14 +1806,12 @@ const App = (() => {
         _updateCustomDayVisibility();
     }
 
-    const _dayNames = ['', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato', 'Domenica'];
-    const _dayNamesShort = ['', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'];
-
     function _initCustomDayDefaults() {
         customDaySchedules = {};
-        for (let d = 1; d <= 7; d++) {
-            customDaySchedules[d] = { startTime: '08:00', stopTime: '20:00', enabled: d <= 5 };
-        }
+        const weekdays = new Set(['mon','tue','wed','thu','fri']);
+        _DAY_KEYS.forEach(k => {
+            customDaySchedules[k] = { startTime: '08:00', stopTime: '20:00', enabled: weekdays.has(k) };
+        });
     }
 
     function _updateCustomDayVisibility() {
@@ -1822,26 +1831,25 @@ const App = (() => {
         const list = document.getElementById('customDayList');
         if (!list) return;
         list.innerHTML = '';
-        for (let d = 1; d <= 7; d++) {
-            const ds = customDaySchedules[d] || { startTime: '08:00', stopTime: '20:00', enabled: false };
+        _DAY_KEYS.forEach(dayKey => {
+            const ds = customDaySchedules[dayKey] || { startTime: '08:00', stopTime: '20:00', enabled: false };
             const row = document.createElement('div');
             row.className = 'custom-day-row' + (ds.enabled ? ' active' : '');
             row.innerHTML = `
                 <label class="custom-day-toggle">
-                    <input type="checkbox" ${ds.enabled ? 'checked' : ''} data-day="${d}">
-                    <span class="custom-day-name">${_dayNamesShort[d]}</span>
+                    <input type="checkbox" ${ds.enabled ? 'checked' : ''} data-day="${dayKey}">
+                    <span class="custom-day-name">${_DAY_SHORT[dayKey]}</span>
                 </label>
                 <div class="custom-day-times ${ds.enabled ? '' : 'disabled'}">
-                    <input type="time" class="custom-day-start" value="${ds.startTime}" data-day="${d}" ${ds.enabled ? '' : 'disabled'}>
+                    <input type="time" class="custom-day-start" value="${ds.startTime}" data-day="${dayKey}" ${ds.enabled ? '' : 'disabled'}>
                     <span class="custom-day-sep">—</span>
-                    <input type="time" class="custom-day-stop" value="${ds.stopTime}" data-day="${d}" ${ds.enabled ? '' : 'disabled'}>
+                    <input type="time" class="custom-day-stop" value="${ds.stopTime}" data-day="${dayKey}" ${ds.enabled ? '' : 'disabled'}>
                 </div>`;
             list.appendChild(row);
 
             // Toggle day
             row.querySelector('input[type="checkbox"]').addEventListener('change', (e) => {
-                const day = e.target.dataset.day;
-                customDaySchedules[day].enabled = e.target.checked;
+                customDaySchedules[e.target.dataset.day].enabled = e.target.checked;
                 _renderCustomDayEditor();
             });
             // Time changes
@@ -1851,7 +1859,7 @@ const App = (() => {
             row.querySelector('.custom-day-stop').addEventListener('change', (e) => {
                 customDaySchedules[e.target.dataset.day].stopTime = e.target.value;
             });
-        }
+        });
     }
 
     function _renderTemplateChips() {
@@ -1897,22 +1905,21 @@ const App = (() => {
                 return;
             }
             if (currentScheduleType === 'window') {
-                for (const [dayNum, ds] of enabledDays) {
+                for (const [dayKey, ds] of enabledDays) {
                     const [sh, sm] = ds.startTime.split(':').map(Number);
                     const [eh, em] = ds.stopTime.split(':').map(Number);
                     if (sh * 60 + sm >= eh * 60 + em) {
-                        showToast(`${_dayNames[dayNum]}: l'orario di avvio deve essere prima dello spegnimento`, 'error');
+                        showToast(`${_DAY_LABELS[dayKey] || dayKey}: l'orario di avvio deve essere prima dello spegnimento`, 'error');
                         return;
                     }
                 }
             }
         }
 
-        const startTime = currentScheduleType === 'window' && currentRecurring !== 'custom' ? getTimePickerValue('startTimePicker') : null;
-        const stopTime = currentScheduleType === 'window' && currentRecurring !== 'custom' ? getTimePickerValue('stopTimePicker') : null;
-
         // Validazione: startTime deve essere prima di stopTime (non custom)
         if (currentScheduleType === 'window' && currentRecurring !== 'custom') {
+            const startTime = getTimePickerValue('startTimePicker');
+            const stopTime = getTimePickerValue('stopTimePicker');
             const [sh, sm] = startTime.split(':').map(Number);
             const [eh, em] = stopTime.split(':').map(Number);
             if (sh * 60 + sm >= eh * 60 + em) {
@@ -1921,25 +1928,31 @@ const App = (() => {
             }
         }
 
-        // Build day schedules for custom recurring
-        let daySchedules = undefined;
+        // Build entry — clean object, no null fields for custom entries
+        const entry = { type: currentScheduleType, recurring: currentRecurring };
+
         if (currentRecurring === 'custom') {
-            daySchedules = {};
-            for (const [dayNum, ds] of Object.entries(customDaySchedules)) {
+            // Custom: only daySchedules, no startTime/stopTime/dates
+            entry.daySchedules = {};
+            for (const [dayKey, ds] of Object.entries(customDaySchedules)) {
                 if (ds.enabled) {
-                    daySchedules[dayNum] = { startTime: ds.startTime, stopTime: ds.stopTime };
+                    entry.daySchedules[dayKey] = { startTime: ds.startTime, stopTime: ds.stopTime };
                 }
             }
+        } else if (currentRecurring === 'none') {
+            // Specific dates
+            entry.dates = Array.from(selectedDates).sort();
+            if (currentScheduleType === 'window') {
+                entry.startTime = getTimePickerValue('startTimePicker');
+                entry.stopTime = getTimePickerValue('stopTimePicker');
+            }
+        } else {
+            // daily, weekdays, weekends
+            if (currentScheduleType === 'window') {
+                entry.startTime = getTimePickerValue('startTimePicker');
+                entry.stopTime = getTimePickerValue('stopTimePicker');
+            }
         }
-
-        const entry = {
-            type: currentScheduleType,
-            startTime,
-            stopTime,
-            recurring: currentRecurring,
-            dates: currentRecurring === 'none' ? Array.from(selectedDates).sort() : [],
-            ...(daySchedules ? { daySchedules } : {})
-        };
 
         // Validazione sovrapposizione per macchina singola
         if (modalTarget.type === 'machine' && currentScheduleType === 'window') {
@@ -2246,7 +2259,14 @@ const App = (() => {
                 for (let d = 1; d <= daysInMonth; d++) { const ds = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const dw = dowForDate(ds); if (dw >= 1 && dw <= 5) addToDate(ds); }
             } else if (entry.recurring === 'weekends') {
                 for (let d = 1; d <= daysInMonth; d++) { const ds = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const dw = dowForDate(ds); if (dw === 0 || dw === 6) addToDate(ds); }
-            } else if (entry.dates) {
+            } else if (entry.recurring === 'custom' && entry.daySchedules) {
+                const activeDayKeys = new Set(Object.keys(entry.daySchedules));
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const ds = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                    const dw = dowForDate(ds);
+                    if (activeDayKeys.has(_JS_DOW_TO_KEY[dw])) addToDate(ds);
+                }
+            } else if (entry.dates && Array.isArray(entry.dates)) {
                 entry.dates.forEach(ds => addToDate(ds));
             }
         });
@@ -2340,7 +2360,7 @@ const App = (() => {
                         if (rec === 'daily') return true;
                         if (rec === 'weekdays' && dow >= 1 && dow <= 5) return true;
                         if (rec === 'weekends' && (dow === 0 || dow === 6)) return true;
-                        if (rec === 'custom' && entry.daySchedules && entry.daySchedules[String(dow === 0 ? 7 : dow)]) return true;
+                        if (rec === 'custom' && entry.daySchedules && entry.daySchedules[_JS_DOW_TO_KEY[dow]]) return true;
                         if (rec === 'none' && entry.dates && entry.dates.includes(dateString)) return true;
                         return false;
                     });
@@ -2349,9 +2369,8 @@ const App = (() => {
                     const entryDetails = applicableEntries.map(e => {
                         if (e.type === 'shutdown') return 'Shutdown';
                         if (e.recurring === 'custom' && e.daySchedules) {
-                            const dayKey = String(dow === 0 ? 7 : dow);
-                            const ds = e.daySchedules[dayKey];
-                            return ds ? `${ds.startTime} — ${ds.stopTime}` : `${e.startTime || '?'} — ${e.stopTime || '?'}`;
+                            const ds = e.daySchedules[_JS_DOW_TO_KEY[dow]];
+                            return ds ? `${ds.startTime} — ${ds.stopTime}` : 'Custom';
                         }
                         return `${e.startTime || '?'} — ${e.stopTime || '?'}`;
                     }).join(', ');
@@ -2418,7 +2437,14 @@ const App = (() => {
                 for (let d = 1; d <= daysInMonth; d++) { const ds = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const dw = dowForDate(ds); if (dw >= 1 && dw <= 5) addToDate(ds); }
             } else if (entry.recurring === 'weekends') {
                 for (let d = 1; d <= daysInMonth; d++) { const ds = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const dw = dowForDate(ds); if (dw === 0 || dw === 6) addToDate(ds); }
-            } else if (entry.dates) {
+            } else if (entry.recurring === 'custom' && entry.daySchedules) {
+                const activeDayKeys = new Set(Object.keys(entry.daySchedules));
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const ds = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                    const dw = dowForDate(ds);
+                    if (activeDayKeys.has(_JS_DOW_TO_KEY[dw])) addToDate(ds);
+                }
+            } else if (entry.dates && Array.isArray(entry.dates)) {
                 entry.dates.forEach(ds => addToDate(ds));
             }
         });
@@ -2541,8 +2567,7 @@ const App = (() => {
                         if (rec === 'weekdays' && dow >= 1 && dow <= 5) return true;
                         if (rec === 'weekends' && (dow === 0 || dow === 6)) return true;
                         if (rec === 'custom' && e.daySchedules) {
-                            const isoDay = dow === 0 ? 7 : dow;
-                            return !!e.daySchedules[String(isoDay)];
+                            return !!e.daySchedules[_JS_DOW_TO_KEY[dow]];
                         }
                         if (rec === 'none' && e.dates && e.dates.includes(ds)) return true;
                         return false;
@@ -2551,8 +2576,7 @@ const App = (() => {
                         const sched = applicable.map(e => {
                             if (e.type === 'shutdown') return 'Shutdown';
                             if (e.recurring === 'custom' && e.daySchedules) {
-                                const isoDay = dow === 0 ? 7 : dow;
-                                const ds2 = e.daySchedules[String(isoDay)];
+                                const ds2 = e.daySchedules[_JS_DOW_TO_KEY[dow]];
                                 return ds2 ? `${ds2.startTime}-${ds2.stopTime}` : 'Custom';
                             }
                             return `${e.startTime}-${e.stopTime}`;

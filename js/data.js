@@ -441,11 +441,12 @@ const DataManager = (() => {
         if (newEntry.recurring === 'custom' && newEntry.daySchedules) {
             // For custom, validate each active day against existing schedules
             const existing = getScheduleEntries(appName, envName, hostname);
-            for (const [dayNum, ds] of Object.entries(newEntry.daySchedules)) {
+            const _dayLabels = { mon:'Lunedì', tue:'Martedì', wed:'Mercoledì', thu:'Giovedì', fri:'Venerdì', sat:'Sabato', sun:'Domenica' };
+            for (const [dayKey, ds] of Object.entries(newEntry.daySchedules)) {
                 const newStart = _timeToMinutes(ds.startTime);
                 const newStop = _timeToMinutes(ds.stopTime);
-                if (newStart < 0 || newStop < 0) return { valid: false, reason: `Giorno ${dayNum}: orario non valido` };
-                if (newStart >= newStop) return { valid: false, reason: `Giorno ${dayNum}: orario di avvio dopo lo spegnimento` };
+                if (newStart < 0 || newStop < 0) return { valid: false, reason: `${_dayLabels[dayKey] || dayKey}: orario non valido` };
+                if (newStart >= newStop) return { valid: false, reason: `${_dayLabels[dayKey] || dayKey}: orario di avvio dopo lo spegnimento` };
             }
             return { valid: true }; // Detailed per-day overlap check skipped for custom (too complex)
         }
@@ -524,13 +525,16 @@ const DataManager = (() => {
         return false;
     }
 
-    // Get active day-of-week numbers for an entry (1=Mon..7=Sun)
+    // Get active day keys for an entry — returns string keys (mon,tue,...,sun)
+    const _ALL_DAY_KEYS = ['mon','tue','wed','thu','fri','sat','sun'];
+    const _WEEKDAY_KEYS = ['mon','tue','wed','thu','fri'];
+    const _WEEKEND_KEYS = ['sat','sun'];
     function _getActiveDays(entry) {
         const rec = entry.recurring || 'none';
-        if (rec === 'daily') return [1,2,3,4,5,6,7];
-        if (rec === 'weekdays') return [1,2,3,4,5];
-        if (rec === 'weekends') return [6,7];
-        if (rec === 'custom' && entry.daySchedules) return Object.keys(entry.daySchedules).map(Number);
+        if (rec === 'daily') return [..._ALL_DAY_KEYS];
+        if (rec === 'weekdays') return [..._WEEKDAY_KEYS];
+        if (rec === 'weekends') return [..._WEEKEND_KEYS];
+        if (rec === 'custom' && entry.daySchedules) return Object.keys(entry.daySchedules);
         return [];
     }
 
@@ -572,7 +576,9 @@ const DataManager = (() => {
             else if (rec === 'weekdays' && dow >= 1 && dow <= 5) applies = true;
             else if (rec === 'weekends' && (dow === 0 || dow === 6)) applies = true;
             else if (rec === 'custom' && entry.daySchedules) {
-                const dayKey = String(dow === 0 ? 7 : dow); // Convert JS dow (0=Sun) to ISO (7=Sun)
+                // JS dow: 0=Sun,1=Mon..6=Sat → string key: sun,mon,..,sat
+                const _jsDowToKey = ['sun','mon','tue','wed','thu','fri','sat'];
+                const dayKey = _jsDowToKey[dow];
                 const ds = entry.daySchedules[dayKey];
                 if (ds) {
                     applies = true;
@@ -1022,8 +1028,8 @@ const DataManager = (() => {
     // ============================================
     // Cronjob Generation (per entry, per server)
     // ============================================
-    // Day number mapping: JS cron uses 0=Sun,1=Mon..6=Sat; our daySchedules uses 1=Mon..7=Sun
-    const _isoToCron = { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 0 }; // ISO day → cron day
+    // Day key → cron day mapping: mon=1, tue=2, ..., sat=6, sun=0
+    const _keyToCron = { mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6, sun: 0 };
 
     function generateCronjobs(entries) {
         if (!entries || entries.length === 0) return [];
@@ -1056,11 +1062,11 @@ const DataManager = (() => {
             } else if (entry.recurring === 'custom' && entry.daySchedules) {
                 // Custom per-day scheduling: group days with identical times for compact cron
                 const timeGroups = {};
-                for (const [isoDay, ds] of Object.entries(entry.daySchedules)) {
+                for (const [dayKey, ds] of Object.entries(entry.daySchedules)) {
                     if (!ds || !ds.startTime || !ds.stopTime) continue;
                     const timeKey = `${ds.startTime}|${ds.stopTime}`;
                     if (!timeGroups[timeKey]) timeGroups[timeKey] = { startTime: ds.startTime, stopTime: ds.stopTime, days: [] };
-                    const cronDay = _isoToCron[Number(isoDay)];
+                    const cronDay = _keyToCron[dayKey];
                     if (cronDay !== undefined) timeGroups[timeKey].days.push(cronDay);
                 }
                 for (const group of Object.values(timeGroups)) {
