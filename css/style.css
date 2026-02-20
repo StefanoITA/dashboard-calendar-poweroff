@@ -1706,7 +1706,21 @@ body {
     min-width: 0;
 }
 
-.modal-body-right { flex: 1; min-width: 0; }
+.modal-body-right {
+    flex: 0 0 280px;
+    width: 280px;
+    min-width: 0;
+    overflow: hidden;
+}
+.calendar-section {
+    width: 100%;
+    box-sizing: border-box;
+}
+.calendar-grid {
+    width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
+}
 
 .modal-target {
     font-size: 0.84rem;

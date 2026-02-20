@@ -574,7 +574,8 @@ const App = (() => {
 
         $('#prevMonth').addEventListener('click', () => navigateMonth(-1));
         $('#nextMonth').addEventListener('click', () => navigateMonth(1));
-        $('#selectWeekdays').addEventListener('click', selectWeekdays);
+        const selWkBtn = document.getElementById('selectWeekdays');
+        if (selWkBtn) selWkBtn.addEventListener('click', selectWeekdays);
         $('#clearSelection').addEventListener('click', () => { selectedDates.clear(); renderCalendar(); });
         $('#gcPrevMonth').addEventListener('click', () => navigateGeneralCalendar(-1));
         $('#gcNextMonth').addEventListener('click', () => navigateGeneralCalendar(1));
@@ -797,12 +798,10 @@ const App = (() => {
             <div class="calendar-weekdays"><span>Lun</span><span>Mar</span><span>Mer</span><span>Gio</span><span>Ven</span><span>Sab</span><span>Dom</span></div>
             <div class="calendar-grid" id="calendarGrid"></div>
             <div class="calendar-actions">
-                <button class="btn-text" id="selectWeekdays">Lun-Ven</button>
                 <button class="btn-clear-selection" id="clearSelection" title="Deseleziona tutto">${SVG.x}</button>
             </div>`;
         section.querySelector('#prevMonth').addEventListener('click', () => navigateMonth(-1));
         section.querySelector('#nextMonth').addEventListener('click', () => navigateMonth(1));
-        section.querySelector('#selectWeekdays').addEventListener('click', selectWeekdays);
         section.querySelector('#clearSelection').addEventListener('click', () => { selectedDates.clear(); renderCalendar(); });
         return section;
     }
@@ -1409,22 +1408,41 @@ const App = (() => {
 
             const vmRefreshBtn = card.querySelector('.btn-vm-refresh');
             if (vmRefreshBtn) {
-                vmRefreshBtn.addEventListener('click', (e) => {
+                vmRefreshBtn.addEventListener('click', async (e) => {
                     e.stopPropagation();
                     const btn = e.currentTarget;
                     if (btn.classList.contains('vm-refresh-cooldown')) return;
                     btn.classList.add('spinning');
-                    // Re-render just this card
-                    setTimeout(() => {
+                    try {
+                        // Fetch fresh data from DynamoDB for this app/env (same logic as global refresh)
+                        if (DynamoService.CONFIG.enabled) {
+                            const key = DynamoService.appEnvKey(appName, envName);
+                            const items = await DynamoService.fetchAll([key]);
+                            if (items && items[key]) {
+                                // Authoritative: clear local schedules for this app/env, then merge DynamoDB data
+                                const prefix = `${appName}|${envName}|`;
+                                const schedulesRef = DataManager.getSchedulesRef();
+                                Object.keys(schedulesRef).forEach(k => { if (k.startsWith(prefix)) delete schedulesRef[k]; });
+                                DynamoService.mergeIntoSchedules(schedulesRef, appName, envName, items[key]);
+                                DataManager.saveSchedulesToStoragePublic();
+                            }
+                        }
+                        // Re-render only this card in-place
                         const parent = card.parentNode;
-                        const newCard = document.createElement('div');
-                        // Re-render this machine card in-place
-                        renderMachineCard(m, appName, envName, readOnly, { appendChild: (c) => { parent.replaceChild(c, card); } });
+                        if (parent) {
+                            const fakeGrid = { appendChild: (c) => parent.replaceChild(c, card) };
+                            renderMachineCard(m, appName, envName, readOnly, fakeGrid);
+                        }
+                        updateChangesBadge();
+                        showToast(`${m.machine_name} aggiornato`, 'success');
+                    } catch (err) {
+                        _log('ERROR', 'VMRefresh', 'Errore aggiornamento VM', { hostname: m.hostname, error: err.message });
+                        showToast('Errore durante l\'aggiornamento', 'error');
+                    } finally {
                         btn.classList.remove('spinning');
                         btn.classList.add('vm-refresh-cooldown');
                         setTimeout(() => btn.classList.remove('vm-refresh-cooldown'), 5000);
-                        showToast(`${m.machine_name} aggiornato`, 'success');
-                    }, 300);
+                    }
                 });
             }
 
@@ -1774,7 +1792,6 @@ const App = (() => {
             _initCustomDayDefaults();
         }
         _renderCustomDayEditor();
-        _renderTemplateChips();
         _updateCustomDayVisibility();
     }
 
@@ -2491,8 +2508,8 @@ const App = (() => {
         lines.push('');
 
         let htmlTable = `<table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:11px;">`;
-        htmlTable += `<tr style="background:#c2410c;color:white;"><th colspan="3" style="padding:8px;font-size:13px;text-align:center;border:1px solid #999;">Calendario Shutdown &mdash; ${monthName} ${year}</th></tr>`;
-        htmlTable += `<tr style="background:#f2f2f2;"><th style="padding:6px 10px;border:1px solid #ccc;text-align:left;width:120px;">Giorno</th><th style="padding:6px 10px;border:1px solid #ccc;text-align:left;">Schedulazioni attive</th><th style="padding:6px 10px;border:1px solid #ccc;text-align:center;width:60px;">Server</th></tr>`;
+        htmlTable += `<tr style="background:#c2410c;color:white;"><th colspan="4" style="padding:8px;font-size:13px;text-align:center;border:1px solid #999;">Calendario Shutdown &mdash; ${monthName} ${year}</th></tr>`;
+        htmlTable += `<tr style="background:#f2f2f2;"><th style="padding:6px 10px;border:1px solid #ccc;text-align:left;width:100px;">Giorno</th><th style="padding:6px 10px;border:1px solid #ccc;text-align:left;width:160px;">Ambiente</th><th style="padding:6px 10px;border:1px solid #ccc;text-align:left;">Server e orari</th><th style="padding:6px 10px;border:1px solid #ccc;text-align:center;width:40px;">N.</th></tr>`;
 
         for (let d = 1; d <= daysInMonth; d++) {
             const ds = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
@@ -2502,38 +2519,59 @@ const App = (() => {
 
             const dayLabel = `${dayNames[date.getDay()]} ${d} ${monthName}`;
             const isWeekend = date.getDay() === 0 || date.getDay() === 6;
-            let totalServers = 0;
-            let entryParts = [];
-            entries.forEach((count, key) => { entryParts.push(`${key} (${count})`); totalServers += count; });
+            const bgStyle = isWeekend ? 'background:#f9f9f9;' : '';
+            const dow = date.getDay();
+            const isFirstRow = { value: true };
 
-            lines.push(`${dayLabel}: ${entryParts.join(', ')} — ${totalServers} server`);
-
-            // Add VM detail per app/env
+            lines.push(`${dayLabel}:`);
             entries.forEach((count, key) => {
                 const parts = key.split(' - ');
                 const appName = parts[0];
                 const envName = parts.length > 1 ? parts.slice(1).join(' - ') : '';
                 const machines = DataManager.getMachines(appName, envName);
-                const dow = date.getDay();
+
+                // Collect applicable VMs with their schedules
+                const vmLines = [];
+                const vmHtmlLines = [];
                 machines.forEach(m => {
                     const mEntries = DataManager.getScheduleEntries(appName, envName, m.hostname);
-                    const applicable = mEntries.filter(entry => {
-                        const rec = entry.recurring || 'none';
+                    const applicable = mEntries.filter(e => {
+                        const rec = e.recurring || 'none';
                         if (rec === 'daily') return true;
                         if (rec === 'weekdays' && dow >= 1 && dow <= 5) return true;
                         if (rec === 'weekends' && (dow === 0 || dow === 6)) return true;
-                        if (rec === 'none' && entry.dates && entry.dates.includes(ds)) return true;
+                        if (rec === 'custom' && e.daySchedules) {
+                            const isoDay = dow === 0 ? 7 : dow;
+                            return !!e.daySchedules[String(isoDay)];
+                        }
+                        if (rec === 'none' && e.dates && e.dates.includes(ds)) return true;
                         return false;
                     });
                     if (applicable.length > 0) {
-                        const sched = applicable.map(e => e.type === 'shutdown' ? 'Shutdown' : `${e.startTime}-${e.stopTime}`).join(', ');
-                        lines.push(`  → ${m.hostname} (${m.machine_name}): ${sched}`);
+                        const sched = applicable.map(e => {
+                            if (e.type === 'shutdown') return 'Shutdown';
+                            if (e.recurring === 'custom' && e.daySchedules) {
+                                const isoDay = dow === 0 ? 7 : dow;
+                                const ds2 = e.daySchedules[String(isoDay)];
+                                return ds2 ? `${ds2.startTime}-${ds2.stopTime}` : 'Custom';
+                            }
+                            return `${e.startTime}-${e.stopTime}`;
+                        }).join(', ');
+                        vmLines.push(`  → ${m.hostname} (${m.machine_name}): ${sched}`);
+                        vmHtmlLines.push(`<div style="font-size:10px;margin:1px 0;"><code style="font-size:9px;background:#f0f0f0;padding:0 3px;">${m.hostname}</code> ${m.machine_name}: <strong>${sched}</strong></div>`);
                     }
                 });
-            });
 
-            const bgStyle = isWeekend ? 'background:#f9f9f9;' : '';
-            htmlTable += `<tr style="${bgStyle}"><td style="padding:4px 10px;border:1px solid #ddd;font-weight:600;">${dayLabel}</td><td style="padding:4px 10px;border:1px solid #ddd;">${entryParts.join('<br>')}</td><td style="padding:4px 10px;border:1px solid #ddd;text-align:center;font-weight:600;">${totalServers}</td></tr>`;
+                lines.push(`  ${key} (${vmLines.length} server):`);
+                vmLines.forEach(l => lines.push(l));
+
+                const dayCell = isFirstRow.value
+                    ? `<td style="padding:4px 10px;border:1px solid #ddd;font-weight:600;${bgStyle}vertical-align:top;" rowspan="${entries.size}">${dayLabel}</td>`
+                    : '';
+                isFirstRow.value = false;
+                htmlTable += `<tr style="${bgStyle}">${dayCell}<td style="padding:4px 10px;border:1px solid #ddd;vertical-align:top;font-size:10px;">${key}</td><td style="padding:4px 10px;border:1px solid #ddd;vertical-align:top;">${vmHtmlLines.join('')}</td><td style="padding:4px 10px;border:1px solid #ddd;text-align:center;font-weight:600;">${vmLines.length}</td></tr>`;
+            });
+            lines.push('');
         }
         htmlTable += '</table>';
 
@@ -3994,8 +4032,11 @@ const App = (() => {
 
                 let entryDetail = '';
                 curr.forEach(e => {
-                    const typeLabel = e.type === 'shutdown' ? 'Shutdown' : `${e.startTime}-${e.stopTime}`;
-                    const recLabel = e.recurring && e.recurring !== 'none' ? ` (${recurringLabels[e.recurring]})` : e.dates ? ` (${e.dates.length} gg)` : '';
+                    let typeLabel;
+                    if (e.type === 'shutdown') typeLabel = 'Shutdown';
+                    else if (e.recurring === 'custom' && e.daySchedules) typeLabel = `Personalizzato (${Object.keys(e.daySchedules).length} giorni)`;
+                    else typeLabel = `${e.startTime || '?'}-${e.stopTime || '?'}`;
+                    const recLabel = e.recurring && e.recurring !== 'none' ? ` (${recurringLabels[e.recurring] || e.recurring})` : e.dates ? ` (${e.dates.length} gg)` : '';
                     entryDetail += `<div class="save-entry-detail">
                         <span class="save-entry-text">${typeLabel}${recLabel}</span>
                         <button class="save-delete-entry-btn" data-entry-id="${e.id}" data-hostname="${hostname}" data-app="${c.app}" data-env="${c.env}" title="Elimina questa entry">&times;</button>
