@@ -52,8 +52,9 @@ DEBUG = os.environ.get("DEBUG", "false").lower() in ("true", "1", "yes")
 
 _VALID_RECURRING = {"daily", "weekdays", "weekends", "none", "custom"}
 _VALID_TYPES = {"window", "shutdown"}
-# ISO day (1=Mon..7=Sun) → cron day (0=Sun,1=Mon..6=Sat)
-_ISO_TO_CRON = {1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 0}
+# String day key → cron day: mon=1, tue=2, ..., sat=6, sun=0
+_KEY_TO_CRON = {"mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6, "sun": 0}
+_VALID_DAY_KEYS = set(_KEY_TO_CRON.keys())
 _DAYS_IN_MONTH = {1: 31, 2: 29, 3: 31, 4: 30, 5: 31, 6: 30,
                   7: 31, 8: 31, 9: 30, 10: 31, 11: 30, 12: 31}
 
@@ -156,7 +157,7 @@ def _validate_entry(entry, hostname):
                  stopTime=entry.get("stopTime"))
             return None
 
-    # Validate custom per-day scheduling
+    # Validate custom per-day scheduling (keys: mon,tue,wed,thu,fri,sat,sun)
     if recurring == "custom":
         day_schedules = entry.get("daySchedules", {})
         if not day_schedules or not isinstance(day_schedules, dict):
@@ -164,11 +165,9 @@ def _validate_entry(entry, hostname):
             return None
         valid_days = {}
         for day_key, ds in day_schedules.items():
-            try:
-                day_num = int(day_key)
-                if day_num < 1 or day_num > 7:
-                    continue
-            except (ValueError, TypeError):
+            if day_key not in _VALID_DAY_KEYS:
+                _log("WARN", "Chiave giorno non valida, ignorata",
+                     hostname=hostname, day_key=day_key)
                 continue
             if not isinstance(ds, dict):
                 continue
@@ -335,6 +334,50 @@ def _build_merged_entry(template_entry, start_min, end_min):
 # ============================================
 # Generazione Cronjob
 # ============================================
+def _generate_crons_for_custom(entry):
+    """
+    Genera cron per schedule custom con orari per-giorno.
+    Le chiavi sono abbreviazioni giorno (mon, tue, wed, thu, fri, sat, sun).
+    Giorni con orari identici vengono raggruppati in un unico cronjob.
+    """
+    entry_type = entry.get("type", "")
+    day_schedules = entry.get("daySchedules", {})
+    if not day_schedules or not isinstance(day_schedules, dict):
+        return []
+
+    crons = []
+    # Group days with identical times for compact cron
+    time_groups = {}
+    for day_key, ds in day_schedules.items():
+        if not ds or not isinstance(ds, dict):
+            continue
+        if day_key not in _KEY_TO_CRON:
+            continue
+        ds_start = _parse_time(ds.get("startTime"))
+        ds_stop = _parse_time(ds.get("stopTime"))
+        if ds_start is None or ds_stop is None:
+            continue
+        time_key = f"{ds.get('startTime')}|{ds.get('stopTime')}"
+        if time_key not in time_groups:
+            time_groups[time_key] = {"start": ds_start, "stop": ds_stop, "days": []}
+        cron_day = _KEY_TO_CRON[day_key]
+        time_groups[time_key]["days"].append(cron_day)
+
+    for group in time_groups.values():
+        if not group["days"]:
+            continue
+        day_str = ",".join(str(d) for d in sorted(group["days"]))
+        s_h, s_m = group["start"]
+        e_h, e_m = group["stop"]
+        if entry_type == "window":
+            crons.append(("start", f"{s_m} {s_h} * * {day_str}"))
+            crons.append(("stop", f"{e_m} {e_h} * * {day_str}"))
+        else:
+            crons.append(("stop", f"0 0 * * {day_str}"))
+
+    return crons
+
+
 def _generate_crons_for_entry(entry):
     """
     Converte un singolo entry di schedule in una lista di tuple (action, cron_expression).
@@ -353,6 +396,10 @@ def _generate_crons_for_entry(entry):
     recurring = entry.get("recurring", "none")
     dates = entry.get("dates", [])
     crons = []
+
+    # Custom entries have per-day times, no global startTime/stopTime
+    if recurring == "custom":
+        return _generate_crons_for_custom(entry)
 
     if entry_type == "window":
         start = _parse_time(entry.get("startTime"))
@@ -384,40 +431,6 @@ def _generate_crons_for_entry(entry):
             crons.append(("stop", f"{stop_m} {stop_h} * * 0,6"))
         else:
             crons.append(("stop", "0 0 * * 0,6"))
-
-    elif recurring == "custom":
-        # Custom per-day scheduling: group days with identical times
-        day_schedules = entry.get("daySchedules", {})
-        time_groups = {}
-        for iso_day_str, ds in day_schedules.items():
-            if not ds or not isinstance(ds, dict):
-                continue
-            ds_start = _parse_time(ds.get("startTime"))
-            ds_stop = _parse_time(ds.get("stopTime"))
-            if ds_start is None or ds_stop is None:
-                continue
-            time_key = f"{ds.get('startTime')}|{ds.get('stopTime')}"
-            if time_key not in time_groups:
-                time_groups[time_key] = {"start": ds_start, "stop": ds_stop, "days": []}
-            try:
-                iso_day = int(iso_day_str)
-                cron_day = _ISO_TO_CRON.get(iso_day)
-                if cron_day is not None:
-                    time_groups[time_key]["days"].append(cron_day)
-            except (ValueError, TypeError):
-                continue
-
-        for group in time_groups.values():
-            if not group["days"]:
-                continue
-            day_str = ",".join(str(d) for d in sorted(group["days"]))
-            s_h, s_m = group["start"]
-            e_h, e_m = group["stop"]
-            if entry_type == "window":
-                crons.append(("start", f"{s_m} {s_h} * * {day_str}"))
-                crons.append(("stop", f"{e_m} {e_h} * * {day_str}"))
-            else:
-                crons.append(("stop", f"0 0 * * {day_str}"))
 
     elif dates:
         # Raggruppa date per anno-mese per cronjob compatti
