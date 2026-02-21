@@ -1102,7 +1102,11 @@ const App = (() => {
         grid.innerHTML = '';
         const inMaint = DataManager.isEnvInMaintenanceNow(appName, envName);
         const maintWindows = DataManager.getMaintenanceWindows(appName, envName);
-        $('#envTitle').innerHTML = `<span class="env-title-app">${appName}</span><span class="env-title-sep">/</span>${envName}${inMaint ? ' <span class="env-maint-badge">MANUTENZIONE</span>' : ''}`;
+        const envPerm = DataManager.getEnvPermission(appName, envName);
+        const permBadge = readOnly
+            ? '<span class="env-perm-badge ro">RO — Sola lettura</span>'
+            : '<span class="env-perm-badge rw">RW</span>';
+        $('#envTitle').innerHTML = `<span class="env-title-app">${appName}</span><span class="env-title-sep">/</span>${envName} ${permBadge}${inMaint ? ' <span class="env-maint-badge">MANUTENZIONE</span>' : ''}`;
         $('#machineCount').innerHTML = `${machines.length} server <span class="env-stats-badge ${hasSchedules ? 'has-schedules' : ''}">${stats.scheduled}/${stats.total} pianificati</span>${maintWindows.length > 0 ? ` <span class="env-maint-count">${maintWindows.length} finestre manutenzione</span>` : ''}`;
 
         // Search + Pianifica Ambiente row
@@ -1120,9 +1124,9 @@ const App = (() => {
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                 Pianifica Ambiente
             </button>` : ''}
-            <button class="btn-secondary btn-maintenance" id="maintenanceBtn" title="Aggiungi finestra di manutenzione">
+            <button class="btn-secondary btn-maintenance" id="maintenanceBtn" title="Gestisci finestre di manutenzione">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="9" y1="16" x2="15" y2="16"/></svg>
-                Aggiungi manutenzione
+                Gestisci manutenzione
             </button>`;
 
         // Remove old search bar if exists
@@ -1702,7 +1706,7 @@ const App = (() => {
                             <label>Data fine</label>
                             <input type="date" id="maintEnd" value="${new Date().toISOString().split('T')[0]}">
                         </div>
-                        <div class="maint-form-field" style="flex:2">
+                        <div class="maint-form-field">
                             <label>Motivo</label>
                             <input type="text" id="maintReason" placeholder="es. Release freeze, manutenzione programmata, festivit\u00e0..." maxlength="200">
                         </div>

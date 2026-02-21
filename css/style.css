@@ -872,7 +872,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 2000;
+    z-index: 95000;
     padding: 20px;
     animation: fadeIn var(--transition-fast);
 }
@@ -4180,21 +4180,29 @@ body:not(.is-admin) #exportBtn { display: none !important; }
 }
 .maint-info svg { flex-shrink: 0; margin-top: 1px; color: var(--accent); }
 .maint-add-form { padding: 16px 20px; border-bottom: 1px solid var(--border-primary); }
-.maint-form-row { display: flex; gap: 10px; align-items: flex-end; margin-bottom: 10px; }
-.maint-form-field { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.maint-form-row {
+    display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 12px;
+    align-items: end; margin-bottom: 12px;
+}
+.maint-form-field { display: flex; flex-direction: column; gap: 5px; }
 .maint-form-field label {
     font-size: 0.7rem; font-weight: 600; color: var(--text-tertiary);
     text-transform: uppercase; letter-spacing: 0.04em;
 }
 .maint-form-field input {
-    padding: 7px 10px; border: 1px solid var(--border-primary);
-    border-radius: 6px; background: var(--bg-primary);
-    color: var(--text-primary); font-size: 0.82rem;
+    padding: 9px 12px; border: 1px solid var(--border-primary);
+    border-radius: 8px; background: var(--bg-primary);
+    color: var(--text-primary); font-size: 0.84rem;
+    height: 38px; box-sizing: border-box;
 }
-.maint-form-field input:focus { border-color: var(--accent); outline: none; }
+.maint-form-field input[type="text"] {
+    border-style: dashed;
+}
+.maint-form-field input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 2px rgba(194,65,12,0.12); }
 .maint-add-btn {
     width: 100%; justify-content: center;
-    padding: 8px 14px !important; font-size: 0.82rem !important;
+    padding: 9px 14px !important; font-size: 0.84rem !important;
+    border-radius: 8px !important;
 }
 .maint-list { padding: 12px 20px 16px; }
 .maint-empty {
@@ -4236,10 +4244,24 @@ body:not(.is-admin) #exportBtn { display: none !important; }
 }
 .maint-remove-btn:hover { background: #ef444415; border-color: #ef4444; color: #ef4444; }
 
-/* Maintenance button in controls row */
+/* Maintenance button in controls row — matched to btn-accent-highlight */
 .btn-maintenance {
-    display: inline-flex; align-items: center; gap: 5px;
-    font-size: 0.78rem !important; padding: 6px 12px !important;
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 0.88rem !important; padding: 10px 20px !important;
+    font-weight: 600; white-space: nowrap;
+}
+
+/* Environment permission badge */
+.env-perm-badge {
+    font-size: 0.65rem; padding: 2px 8px; border-radius: 4px;
+    font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+    margin-left: 8px; vertical-align: middle;
+}
+.env-perm-badge.rw {
+    background: #05966914; color: #059669; border: 1px solid #05966930;
+}
+.env-perm-badge.ro {
+    background: #d9770614; color: #d97706; border: 1px solid #d9770630;
 }
 
 /* Environment maintenance indicators */
