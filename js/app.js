@@ -1025,7 +1025,14 @@ const App = (() => {
             const upcomingDisplay = upcoming.slice(0, 8);
             upcomingDisplay.forEach(u => {
                 const isRecurring = u.recurring;
-                const schedLabel = u.entry.type === 'shutdown' ? 'Shutdown' : `${u.entry.startTime || '?'} — ${u.entry.stopTime || '?'}`;
+                let schedLabel;
+                if (u.entry.type === 'shutdown') schedLabel = 'Shutdown';
+                else if (u.entry.recurring === 'custom' && u.entry.daySchedules) {
+                    const days = Object.keys(u.entry.daySchedules);
+                    const first = u.entry.daySchedules[days[0]];
+                    schedLabel = first ? `${first.startTime} — ${first.stopTime}` : 'Personalizzato';
+                    if (days.length > 1) schedLabel += ` (+${days.length - 1})`;
+                } else schedLabel = `${u.entry.startTime || '?'} — ${u.entry.stopTime || '?'}`;
                 const recLabel = isRecurring ? (recurringLabels[u.entry.recurring] || u.entry.recurring) : (u.dates ? u.dates.slice(0, 2).join(', ') : '');
                 const envCls = envClassMap[u.env] || 'dev';
                 html += `<div class="home-upcoming-item">
@@ -1414,10 +1421,13 @@ const App = (() => {
 
             const vmRefreshBtn = card.querySelector('.btn-vm-refresh');
             if (vmRefreshBtn) {
+                // Cooldown tracked by hostname, survives card re-render
+                if (!window._vmRefreshCooldowns) window._vmRefreshCooldowns = {};
+                if (window._vmRefreshCooldowns[m.hostname]) vmRefreshBtn.classList.add('vm-refresh-cooldown');
                 vmRefreshBtn.addEventListener('click', async (e) => {
                     e.stopPropagation();
                     const btn = e.currentTarget;
-                    if (btn.classList.contains('vm-refresh-cooldown')) return;
+                    if (window._vmRefreshCooldowns[m.hostname] || btn.classList.contains('vm-refresh-cooldown')) return;
                     btn.classList.add('spinning');
                     try {
                         // Fetch fresh data from DynamoDB for this app/env (same logic as global refresh)
@@ -1447,7 +1457,12 @@ const App = (() => {
                     } finally {
                         btn.classList.remove('spinning');
                         btn.classList.add('vm-refresh-cooldown');
-                        setTimeout(() => btn.classList.remove('vm-refresh-cooldown'), 5000);
+                        window._vmRefreshCooldowns[m.hostname] = true;
+                        setTimeout(() => {
+                            delete window._vmRefreshCooldowns[m.hostname];
+                            const liveBtn = document.querySelector(`.btn-vm-refresh[data-hostname="${m.hostname}"]`);
+                            if (liveBtn) liveBtn.classList.remove('vm-refresh-cooldown');
+                        }, 5000);
                     }
                 });
             }
@@ -1774,7 +1789,8 @@ const App = (() => {
             const reason = overlay.querySelector('#maintReason').value.trim();
             if (!start || !end) { showToast('Inserisci date valide', 'error'); return; }
             if (start > end) { showToast('La data di inizio deve essere prima della data di fine', 'error'); return; }
-            DataManager.addMaintenanceWindow(appName, envName, start, end, reason);
+            const id = DataManager.addMaintenanceWindow(appName, envName, start, end, reason);
+            if (!id) { showToast('Esiste gi\u00e0 una finestra di manutenzione con le stesse date per questo ambiente', 'error'); return; }
             AuditLog.log('Aggiunta finestra manutenzione', `${appName}/${envName}: ${start} — ${end} (${reason})`);
             updateChangesBadge();
             overlay.querySelector('#maintReason').value = '';
@@ -1984,7 +2000,7 @@ const App = (() => {
         }
 
         // Validazione sovrapposizione per macchina singola
-        if (modalTarget.type === 'machine' && currentScheduleType === 'window') {
+        if (modalTarget.type === 'machine') {
             const check = DataManager.validateScheduleOverlap(
                 modalTarget.app, modalTarget.env, modalTarget.hostname,
                 entry, editingEntryId || undefined
@@ -1996,7 +2012,7 @@ const App = (() => {
         }
 
         // Validazione sovrapposizione per ambiente intero
-        if ((modalTarget.type === 'environment' || modalTarget.type === 'environment-edit') && currentScheduleType === 'window') {
+        if (modalTarget.type === 'environment' || modalTarget.type === 'environment-edit') {
             const machines = DataManager.getMachines(modalTarget.app, modalTarget.env);
             const conflicts = [];
             for (const m of machines) {
@@ -4234,10 +4250,10 @@ const App = (() => {
                 if (failed.length > 0) {
                     showToast(`Errore nel salvataggio di ${failed.length}/${finalChanges.length} ambienti. Riprova.`, 'error');
                 } else {
-                    showToast(`Configurazione salvata${DynamoService.CONFIG.enabled ? ' su DynamoDB' : ''} \u2014 ${finalChanges.length} ambienti`, 'success');
+                    showToast(`Configurazione salvata con successo nel database \u2014 ${finalChanges.length} ambienti aggiornati`, 'success');
                 }
             } else {
-                showToast('Modifiche salvate in locale (DynamoDB non configurato)', 'success');
+                showToast('Modifiche salvate in locale', 'success');
             }
 
             AuditLog.log('Salvataggio configurazione', `${finalChanges.length} ambienti aggiornati`);

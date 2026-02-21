@@ -435,22 +435,76 @@ const DataManager = (() => {
      * Ritorna: { valid: true } oppure { valid: false, reason: '...' }
      */
     function validateScheduleOverlap(appName, envName, hostname, newEntry, excludeEntryId) {
+        // Shutdown: check for conflicting window entries on the same days
+        if (newEntry.type === 'shutdown') {
+            const existing = getScheduleEntries(appName, envName, hostname);
+            for (const ex of existing) {
+                if (excludeEntryId && ex.id === excludeEntryId) continue;
+                if (ex.type !== 'window') continue;
+                if (_recurringOverlaps(newEntry, ex)) {
+                    return { valid: false, reason: 'Conflitto: esiste una finestra oraria attiva sugli stessi giorni. Rimuovila prima di impostare uno Shutdown.' };
+                }
+            }
+            return { valid: true };
+        }
         if (newEntry.type !== 'window') return { valid: true };
 
-        // Custom entries: validate per-day
+        // Custom entries: validate each day and check overlaps with existing entries
         if (newEntry.recurring === 'custom' && newEntry.daySchedules) {
-            // For custom, validate each active day against existing schedules
             const existing = getScheduleEntries(appName, envName, hostname);
             const _dayLabels = { mon:'Lunedì', tue:'Martedì', wed:'Mercoledì', thu:'Giovedì', fri:'Venerdì', sat:'Sabato', sun:'Domenica' };
+            // Map day key → which non-custom recurring types cover it
+            const _dayToRecurring = {};
+            _WEEKDAY_KEYS.forEach(k => { _dayToRecurring[k] = ['daily','weekdays']; });
+            _WEEKEND_KEYS.forEach(k => { _dayToRecurring[k] = ['daily','weekends']; });
+
             for (const [dayKey, ds] of Object.entries(newEntry.daySchedules)) {
                 const newStart = _timeToMinutes(ds.startTime);
                 const newStop = _timeToMinutes(ds.stopTime);
                 if (newStart < 0 || newStop < 0) return { valid: false, reason: `${_dayLabels[dayKey] || dayKey}: orario non valido` };
                 if (newStart >= newStop) return { valid: false, reason: `${_dayLabels[dayKey] || dayKey}: orario di avvio dopo lo spegnimento` };
+
+                // Check this day's window against all existing entries that cover this day
+                for (const ex of existing) {
+                    if (excludeEntryId && ex.id === excludeEntryId) continue;
+                    if (ex.type === 'shutdown') {
+                        // Shutdown on overlapping days = conflict
+                        const exDays = _getActiveDays(ex);
+                        if (exDays.includes(dayKey)) {
+                            return { valid: false, reason: `${_dayLabels[dayKey]}: conflitto con Shutdown esistente` };
+                        }
+                        continue;
+                    }
+                    if (ex.type !== 'window') continue;
+
+                    // Check if the existing entry covers this day
+                    const exRec = ex.recurring || 'none';
+                    const coversDay = (exRec === 'daily') ||
+                        (exRec === 'weekdays' && _WEEKDAY_KEYS.includes(dayKey)) ||
+                        (exRec === 'weekends' && _WEEKEND_KEYS.includes(dayKey)) ||
+                        (exRec === 'custom' && ex.daySchedules && ex.daySchedules[dayKey]);
+                    if (!coversDay) continue;
+
+                    // Get the existing time range for this day
+                    let exStart, exStop;
+                    if (exRec === 'custom' && ex.daySchedules && ex.daySchedules[dayKey]) {
+                        exStart = _timeToMinutes(ex.daySchedules[dayKey].startTime);
+                        exStop = _timeToMinutes(ex.daySchedules[dayKey].stopTime);
+                    } else {
+                        exStart = _timeToMinutes(ex.startTime);
+                        exStop = _timeToMinutes(ex.stopTime);
+                    }
+                    if (exStart < 0 || exStop < 0) continue;
+
+                    if (newStart < exStop && newStop > exStart) {
+                        return { valid: false, reason: `${_dayLabels[dayKey]}: sovrapposizione orari con schedulazione esistente` };
+                    }
+                }
             }
-            return { valid: true }; // Detailed per-day overlap check skipped for custom (too complex)
+            return { valid: true };
         }
 
+        // Non-custom: also check against existing custom entries
         const newStart = _timeToMinutes(newEntry.startTime);
         const newStop = _timeToMinutes(newEntry.stopTime);
         if (newStart < 0 || newStop < 0) return { valid: false, reason: 'Orario non valido' };
@@ -459,10 +513,31 @@ const DataManager = (() => {
         const existing = getScheduleEntries(appName, envName, hostname);
         for (const entry of existing) {
             if (excludeEntryId && entry.id === excludeEntryId) continue;
+
+            // Check against shutdown entries
+            if (entry.type === 'shutdown') {
+                if (_recurringOverlaps(newEntry, entry)) {
+                    return { valid: false, reason: 'Conflitto con Shutdown esistente sui medesimi giorni' };
+                }
+                continue;
+            }
             if (entry.type !== 'window') continue;
 
-            // Skip overlap check between custom and non-custom (handled at custom entry creation)
-            if (entry.recurring === 'custom') continue;
+            // Check custom entries per-day
+            if (entry.recurring === 'custom' && entry.daySchedules) {
+                const newDays = _getActiveDays(newEntry);
+                for (const dayKey of newDays) {
+                    const exDay = entry.daySchedules[dayKey];
+                    if (!exDay) continue;
+                    const exStart = _timeToMinutes(exDay.startTime);
+                    const exStop = _timeToMinutes(exDay.stopTime);
+                    if (exStart >= 0 && exStop >= 0 && newStart < exStop && newStop > exStart) {
+                        const _dayLabels = { mon:'Lunedì', tue:'Martedì', wed:'Mercoledì', thu:'Giovedì', fri:'Venerdì', sat:'Sabato', sun:'Domenica' };
+                        return { valid: false, reason: `Sovrapposizione con schedule personalizzata (${_dayLabels[dayKey] || dayKey})` };
+                    }
+                }
+                continue;
+            }
 
             const exStart = _timeToMinutes(entry.startTime);
             const exStop = _timeToMinutes(entry.stopTime);
@@ -755,6 +830,9 @@ const DataManager = (() => {
     function addMaintenanceWindow(appName, envName, startDate, endDate, reason) {
         const key = _maintenanceKey(appName, envName);
         if (!schedules[key]) schedules[key] = [];
+        // Prevent duplicates: same start+end in same environment
+        const duplicate = schedules[key].find(w => w.startDate === startDate && w.endDate === endDate);
+        if (duplicate) return null; // Caller should show error
         const win = { id: generateId(), type: 'maintenance', startDate, endDate, reason: reason || '' };
         schedules[key].push(win);
         saveSchedulesToStorage();
