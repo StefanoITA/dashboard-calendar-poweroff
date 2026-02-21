@@ -4016,9 +4016,10 @@ body:not(.is-admin) #exportBtn { display: none !important; }
     animation: spin 0.6s linear infinite;
 }
 .btn-vm-refresh.vm-refresh-cooldown {
-    opacity: 0.3;
+    opacity: 0.4;
     cursor: not-allowed;
     pointer-events: none;
+    position: relative;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -4552,4 +4553,93 @@ body:not(.is-admin) #exportBtn { display: none !important; }
     color: var(--accent);
     font-weight: 600;
     flex-shrink: 0;
+}
+
+/* ============================================
+   VM Refresh Cooldown Indicator
+   ============================================ */
+.btn-vm-refresh.vm-refresh-cooldown::after {
+    content: attr(data-cooldown);
+    position: absolute;
+    top: -2px;
+    right: -6px;
+    font-size: 0.55rem;
+    font-weight: 700;
+    min-width: 13px;
+    height: 13px;
+    line-height: 13px;
+    text-align: center;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+}
+
+/* ============================================
+   Environment Popover Permission Tags
+   ============================================ */
+.env-popover-perm {
+    font-size: 0.58rem;
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-left: 4px;
+    vertical-align: middle;
+}
+.env-popover-perm.rw {
+    background: #05966918;
+    color: #059669;
+}
+.env-popover-perm.ro {
+    background: #d9770618;
+    color: #d97706;
+}
+
+/* ============================================
+   Global Maintenance Panel
+   ============================================ */
+.maint-panel-global {
+    max-width: 720px;
+    max-height: 85vh;
+}
+.maint-global-list {
+    overflow-y: auto;
+    max-height: calc(85vh - 160px);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 4px 0;
+}
+.maint-global-group {
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-lg, 10px);
+    overflow: hidden;
+    background: var(--bg-secondary, var(--bg-primary));
+}
+.maint-global-group-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: var(--bg-tertiary, var(--bg-secondary));
+    font-size: 0.82rem;
+    border-bottom: 1px solid var(--border-primary);
+}
+.maint-global-sep {
+    color: var(--text-tertiary);
+    font-weight: 400;
+}
+.maint-global-group-items {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+.maint-global-group-items .maint-item {
+    border-radius: 0;
+    border: none;
+    border-bottom: 1px solid var(--border-secondary, var(--border-primary));
+}
+.maint-global-group-items .maint-item:last-child {
+    border-bottom: none;
 }
