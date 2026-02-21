@@ -477,6 +477,7 @@ const App = (() => {
         renderVMListButton();
         renderEBSListButton();
         renderCalculatorButton();
+        renderMaintenanceListButton();
         renderUserMgmtButton();
         renderHomeDashboard();
         initTimePickers();
@@ -690,6 +691,7 @@ const App = (() => {
                 applyRoleMode();
                 renderAppList();
                 renderVMListButton();
+                renderMaintenanceListButton();
                 renderHomeDashboard();
                 goHome();
                 gcActiveFilters.clear();
@@ -760,6 +762,8 @@ const App = (() => {
         if (userMgmtBtn) userMgmtBtn.classList.toggle('active', view === 'user-mgmt');
         const calcBtn = document.getElementById('calculatorBtn');
         if (calcBtn) calcBtn.classList.toggle('active', view === 'calculator');
+        const maintListBtn = document.getElementById('maintenanceListBtn');
+        if (maintListBtn) maintListBtn.classList.remove('active');
     }
 
     function updateCalendarVisibility() {
@@ -875,6 +879,18 @@ const App = (() => {
         navActions.appendChild(btn);
     }
 
+    function renderMaintenanceListButton() {
+        const old = document.getElementById('maintenanceListBtn');
+        if (old) old.remove();
+        const navActions = document.querySelector('.sidebar-nav-actions');
+        const btn = document.createElement('button');
+        btn.className = 'sidebar-action-btn';
+        btn.id = 'maintenanceListBtn';
+        btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg> Manutenzioni programmate`;
+        btn.addEventListener('click', openGlobalMaintenancePanel);
+        navActions.appendChild(btn);
+    }
+
     function renderUserMgmtButton() {
         const old = document.getElementById('userMgmtBtn');
         if (old) old.remove();
@@ -913,7 +929,9 @@ const App = (() => {
             const hasSchedules = DataManager.envHasSchedules(appName, env.name);
             const item = document.createElement('div');
             item.className = 'env-popover-item' + (currentEnv === env.name ? ' active' : '');
-            item.innerHTML = `<span class="env-dot ${cssClass}"></span><span>${env.name}</span><span class="env-popover-badge">${env.machineCount}${hasSchedules ? ' \u2713' : ''}</span>`;
+            const envPerm = DataManager.getEnvPermission(currentApp, env.name);
+            const envPermTag = envPerm === 'ro' ? '<span class="env-popover-perm ro">RO</span>' : '<span class="env-popover-perm rw">RW</span>';
+            item.innerHTML = `<span class="env-dot ${cssClass}"></span><span>${env.name}</span><span class="env-popover-badge">${env.machineCount}${hasSchedules ? ' \u2713' : ''} ${envPermTag}</span>`;
             item.addEventListener('click', () => {
                 selectEnv(env.name);
                 list.querySelectorAll('.env-popover-item').forEach(el => el.classList.remove('active'));
@@ -1423,7 +1441,10 @@ const App = (() => {
             if (vmRefreshBtn) {
                 // Cooldown tracked by hostname, survives card re-render
                 if (!window._vmRefreshCooldowns) window._vmRefreshCooldowns = {};
-                if (window._vmRefreshCooldowns[m.hostname]) vmRefreshBtn.classList.add('vm-refresh-cooldown');
+                if (window._vmRefreshCooldowns[m.hostname]) {
+                    vmRefreshBtn.classList.add('vm-refresh-cooldown');
+                    vmRefreshBtn.title = 'Attendi...';
+                }
                 vmRefreshBtn.addEventListener('click', async (e) => {
                     e.stopPropagation();
                     const btn = e.currentTarget;
@@ -1457,12 +1478,26 @@ const App = (() => {
                     } finally {
                         btn.classList.remove('spinning');
                         btn.classList.add('vm-refresh-cooldown');
+                        let remaining = 5;
+                        btn.dataset.cooldown = remaining;
+                        btn.title = `Attendi ${remaining}s`;
                         window._vmRefreshCooldowns[m.hostname] = true;
-                        setTimeout(() => {
-                            delete window._vmRefreshCooldowns[m.hostname];
+                        const cdInterval = setInterval(() => {
+                            remaining--;
                             const liveBtn = document.querySelector(`.btn-vm-refresh[data-hostname="${m.hostname}"]`);
-                            if (liveBtn) liveBtn.classList.remove('vm-refresh-cooldown');
-                        }, 5000);
+                            if (remaining <= 0) {
+                                clearInterval(cdInterval);
+                                delete window._vmRefreshCooldowns[m.hostname];
+                                if (liveBtn) {
+                                    liveBtn.classList.remove('vm-refresh-cooldown');
+                                    delete liveBtn.dataset.cooldown;
+                                    liveBtn.title = 'Aggiorna stato VM';
+                                }
+                            } else if (liveBtn) {
+                                liveBtn.dataset.cooldown = remaining;
+                                liveBtn.title = `Attendi ${remaining}s`;
+                            }
+                        }, 1000);
                     }
                 });
             }
@@ -1797,6 +1832,116 @@ const App = (() => {
             renderList();
             showToast('Finestra di manutenzione aggiunta — premi Salva per sincronizzare', 'success');
         });
+
+        overlay.querySelector('.maint-close-btn').addEventListener('click', () => overlay.remove());
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    }
+
+    // ============================================
+    // Global Maintenance Panel — All environments
+    // ============================================
+    function openGlobalMaintenancePanel() {
+        _log('INFO', 'Maintenance', 'Apertura pannello manutenzioni globale');
+        const existing = document.querySelector('.maint-overlay');
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.className = 'maint-overlay';
+        overlay.innerHTML = `
+            <div class="maint-panel maint-panel-global">
+                <div class="maint-header">
+                    <div>
+                        <h3>Manutenzioni Programmate</h3>
+                        <span class="maint-subtitle">Panoramica globale di tutte le finestre di manutenzione</span>
+                    </div>
+                    <button class="btn-icon maint-close-btn" title="Chiudi">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                </div>
+                <div class="maint-info">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    <span>Visualizzazione centralizzata di tutte le finestre di manutenzione. Durante la manutenzione le schedulazioni dell'ambiente vengono <strong>sospese</strong>. Puoi modificare solo gli ambienti in cui hai permessi <strong>RW</strong>.</span>
+                </div>
+                <div class="maint-global-list" id="maintGlobalList"></div>
+            </div>`;
+        document.body.appendChild(overlay);
+
+        const renderGlobalList = () => {
+            const list = overlay.querySelector('#maintGlobalList');
+            const allWindows = DataManager.getAllMaintenanceWindows();
+            if (allWindows.length === 0) {
+                list.innerHTML = '<div class="maint-empty">Nessuna finestra di manutenzione configurata in nessun ambiente</div>';
+                return;
+            }
+            const today = new Date().toISOString().split('T')[0];
+
+            // Group by app/env
+            const grouped = {};
+            allWindows.forEach(w => {
+                const key = `${w.appName}|${w.envName}`;
+                if (!grouped[key]) grouped[key] = { appName: w.appName, envName: w.envName, windows: [] };
+                grouped[key].windows.push(w);
+            });
+
+            let html = '';
+            for (const group of Object.values(grouped)) {
+                const isRo = DataManager.isEnvReadOnly(group.appName, group.envName);
+                const permBadge = isRo ? '<span class="env-perm-badge ro">RO</span>' : '<span class="env-perm-badge rw">RW</span>';
+                const cssClass = envClassMap[group.envName] || 'dev';
+                html += `<div class="maint-global-group">
+                    <div class="maint-global-group-header">
+                        <span class="env-dot ${cssClass}"></span>
+                        <strong>${group.appName}</strong>
+                        <span class="maint-global-sep">/</span>
+                        <strong>${group.envName}</strong>
+                        ${permBadge}
+                    </div>
+                    <div class="maint-global-group-items">`;
+
+                group.windows.forEach(w => {
+                    const isActive = today >= w.startDate && today <= w.endDate;
+                    const isFuture = today < w.startDate;
+                    const isPast = today > w.endDate;
+                    html += `<div class="maint-item ${isActive ? 'active' : ''} ${isPast ? 'past' : ''}">
+                        <div class="maint-item-body">
+                            <div class="maint-item-dates">
+                                <strong>${w.startDate}</strong> <span class="maint-item-sep">\u2192</span> <strong>${w.endDate}</strong>
+                                ${isActive ? '<span class="maint-badge-active">IN CORSO</span>' : ''}
+                                ${isFuture ? '<span class="maint-badge-future">PIANIFICATA</span>' : ''}
+                                ${isPast ? '<span class="maint-badge-past">CONCLUSA</span>' : ''}
+                            </div>
+                            ${w.reason ? `<div class="maint-item-reason">${w.reason}</div>` : ''}
+                        </div>
+                        ${!isRo ? `<button class="maint-remove-btn" data-id="${w.id}" data-app="${group.appName}" data-env="${group.envName}" title="Rimuovi finestra">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                        </button>` : ''}
+                    </div>`;
+                });
+                html += `</div></div>`;
+            }
+            list.innerHTML = html;
+
+            // Bind remove buttons
+            list.querySelectorAll('.maint-remove-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const confirmed = await confirmDialog({
+                        title: 'Rimuovere finestra di manutenzione?',
+                        message: `Le schedulazioni di <strong>${btn.dataset.app} / ${btn.dataset.env}</strong> torneranno attive per questo periodo. Ricorda di premere <strong>Salva</strong> per sincronizzare.`,
+                        confirmLabel: 'Rimuovi',
+                        iconType: 'warning',
+                        confirmClass: 'btn-primary'
+                    });
+                    if (!confirmed) return;
+                    DataManager.removeMaintenanceWindow(btn.dataset.app, btn.dataset.env, btn.dataset.id);
+                    AuditLog.log('Rimossa finestra manutenzione', `${btn.dataset.app}/${btn.dataset.env}`);
+                    updateChangesBadge();
+                    renderGlobalList();
+                    showToast('Finestra di manutenzione rimossa — premi Salva per sincronizzare', 'info');
+                });
+            });
+        };
+
+        renderGlobalList();
 
         overlay.querySelector('.maint-close-btn').addEventListener('click', () => overlay.remove());
         overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
@@ -3957,6 +4102,7 @@ const App = (() => {
             renderAppList();
             renderVMListButton();
             renderEBSListButton();
+            renderMaintenanceListButton();
             renderHomeDashboard();
             if (currentView === 'machines' && currentApp && currentEnv) {
                 renderMachines(currentApp, currentEnv);

@@ -857,6 +857,22 @@ const DataManager = (() => {
         return isDateInMaintenance(appName, envName, today);
     }
 
+    // Get all maintenance windows across all accessible environments
+    function getAllMaintenanceWindows() {
+        const result = [];
+        for (const [key, entries] of Object.entries(schedules)) {
+            const parts = key.split('|');
+            if (parts.length !== 3 || parts[2] !== MAINTENANCE_KEY) continue;
+            const [app, env] = parts;
+            if (!canAccessApp(app)) continue;
+            entries.forEach(w => {
+                result.push({ ...w, appName: app, envName: env });
+            });
+        }
+        result.sort((a, b) => a.startDate.localeCompare(b.startDate));
+        return result;
+    }
+
     // ============================================
     // Schedule Exceptions (per-entry overrides for specific dates)
     // ============================================
@@ -1186,7 +1202,7 @@ const DataManager = (() => {
         getVMListMachines, generateCronjobs,
         loadEBSVolumes, getEBSVolumes,
         // Maintenance windows
-        addMaintenanceWindow, removeMaintenanceWindow, getMaintenanceWindows,
+        addMaintenanceWindow, removeMaintenanceWindow, getMaintenanceWindows, getAllMaintenanceWindows,
         isDateInMaintenance, isEnvInMaintenanceNow, MAINTENANCE_KEY,
         // Exceptions
         addScheduleException, removeScheduleException, getScheduleExceptions, getAllExceptions,
