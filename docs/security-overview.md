@@ -5,6 +5,7 @@
 **Classificazione:** Interno / Confidenziale
 
 ---
+https://excalidraw.com/#room=b34f83e46b566f38108c,88pQMXzb_N1gXF036uBZqg
 
 ## 1. Panoramica del Sistema
 
